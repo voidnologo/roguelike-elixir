@@ -190,74 +190,78 @@ defmodule Roguelike do
             old_pos = state.player.pos
             new_pos = Position.move(state.player.pos, dx, dy)
 
-            Logger.debug("Moving from #{inspect(old_pos)} to #{inspect(new_pos)}")
+            Logger.debug("Attempting move from #{inspect(old_pos)} to #{inspect(new_pos)}")
 
             if is_valid_move?(new_pos, state.map) do
-              tile = state.map[new_pos.y][new_pos.x]
+              # Check for enemy at new position
+              enemy_at_new_pos =
+                Enum.find(state.enemies, fn e ->
+                  e.pos == new_pos and Entity.is_alive?(e)
+                end)
 
-              # Clear old player position
-              new_map = put_in_map(state.map, old_pos.y, old_pos.x, @floor)
-              Logger.debug("Old position cleared: #{inspect({old_pos.x, old_pos.y})} set to '.'")
+              if enemy_at_new_pos do
+                # Enemy present, attack without moving
+                Logger.debug("Attacking enemy #{enemy_at_new_pos.symbol} at #{inspect(new_pos)}")
 
-              case tile do
-                @door_closed ->
-                  new_map = put_in_map(new_map, new_pos.y, new_pos.x, @door_open)
-                  update_effects(%{state | map: new_map})
+                combat(state, state.player, enemy_at_new_pos)
+                |> update_effects()
+              else
+                # No enemy, proceed with move
+                new_map = put_in_map(state.map, old_pos.y, old_pos.x, @floor)
 
-                @door_open ->
-                  new_player = %{state.player | pos: new_pos}
+                Logger.debug(
+                  "Old position cleared: #{inspect({old_pos.x, old_pos.y})} set to '.'"
+                )
 
-                  new_state = %{
-                    state
-                    | map: new_map,
-                      player: new_player,
-                      explored: MapSet.put(state.explored, {new_pos.x, new_pos.y})
-                  }
+                tile = state.map[new_pos.y][new_pos.x]
 
-                  Enum.reduce(new_state.enemies, new_state, fn enemy, acc ->
-                    if enemy.pos == new_pos and Entity.is_alive?(enemy),
-                      do: combat(acc, acc.player, enemy),
-                      else: acc
-                  end)
-                  |> pickup_item(new_pos)
-                  |> update_effects()
+                case tile do
+                  @door_closed ->
+                    new_map = put_in_map(new_map, new_pos.y, new_pos.x, @door_open)
+                    update_effects(%{state | map: new_map})
 
-                @floor ->
-                  new_player = %{state.player | pos: new_pos}
+                  @door_open ->
+                    new_player = %{state.player | pos: new_pos}
 
-                  new_state = %{
-                    state
-                    | map: new_map,
-                      player: new_player,
-                      explored: MapSet.put(state.explored, {new_pos.x, new_pos.y})
-                  }
+                    new_state = %{
+                      state
+                      | map: new_map,
+                        player: new_player,
+                        explored: MapSet.put(state.explored, {new_pos.x, new_pos.y})
+                    }
 
-                  Enum.reduce(new_state.enemies, new_state, fn enemy, acc ->
-                    if enemy.pos == new_pos and Entity.is_alive?(enemy),
-                      do: combat(acc, acc.player, enemy),
-                      else: acc
-                  end)
-                  |> pickup_item(new_pos)
-                  |> update_effects()
+                    new_state
+                    |> pickup_item(new_pos)
+                    |> update_effects()
 
-                # Safeguard for unexpected tiles
-                _ ->
-                  new_player = %{state.player | pos: new_pos}
+                  @floor ->
+                    new_player = %{state.player | pos: new_pos}
 
-                  new_state = %{
-                    state
-                    | map: new_map,
-                      player: new_player,
-                      explored: MapSet.put(state.explored, {new_pos.x, new_pos.y})
-                  }
+                    new_state = %{
+                      state
+                      | map: new_map,
+                        player: new_player,
+                        explored: MapSet.put(state.explored, {new_pos.x, new_pos.y})
+                    }
 
-                  Enum.reduce(new_state.enemies, new_state, fn enemy, acc ->
-                    if enemy.pos == new_pos and Entity.is_alive?(enemy),
-                      do: combat(acc, acc.player, enemy),
-                      else: acc
-                  end)
-                  |> pickup_item(new_pos)
-                  |> update_effects()
+                    new_state
+                    |> pickup_item(new_pos)
+                    |> update_effects()
+
+                  _ ->
+                    new_player = %{state.player | pos: new_pos}
+
+                    new_state = %{
+                      state
+                      | map: new_map,
+                        player: new_player,
+                        explored: MapSet.put(state.explored, {new_pos.x, new_pos.y})
+                    }
+
+                    new_state
+                    |> pickup_item(new_pos)
+                    |> update_effects()
+                end
               end
             else
               Logger.debug(
@@ -359,7 +363,6 @@ defmodule Roguelike do
 
     legend = "Symbols: "
 
-    # Filter visible entities, safely handling Items vs Entities
     visible_entities =
       Enum.filter(state.items ++ state.enemies, fn entity ->
         is_visible?(state.player.pos, entity.pos, state.map) and
@@ -593,12 +596,11 @@ defmodule Roguelike do
 
   def spawn_initial_enemies(rooms, player_pos) do
     exclude = player_pos
+    initial_enemies = ["Goblin", "Orc", "Troll", "Dragon", "Skeleton"]
 
-    Enum.map(["Goblin", "Orc", "Troll"], fn enemy_type ->
+    Enum.map(initial_enemies, fn enemy_type ->
       stats = @enemy_types[enemy_type]
-      # Unpack tuple
       {min_hp, max_hp} = stats.hp_range
-      # Convert to range
       hp = Enum.random(min_hp..max_hp)
       pos = place_entity_in_room(rooms, exclude)
 
@@ -716,7 +718,6 @@ defmodule Roguelike do
               Enum.map(state.enemies, fn e -> if e == defender, do: new_defender, else: e end)
         }
 
-    # Safely handle weapon effects
     new_state =
       if attacker == state.player and state.inventory.weapon != nil do
         weapon_stats = @weapon_types[state.inventory.weapon]
@@ -852,12 +853,8 @@ defmodule Roguelike do
       else
         acc =
           if acc.inventory.weapon do
-            # Find the old weapon's stats
-            old_weapon =
+            {old_weapon_name, old_weapon_stats} =
               Enum.find(@weapon_types, fn {_, v} -> v.damage_range == acc.player.damage_range end)
-
-            # Destructure the tuple correctly
-            {old_weapon_name, old_weapon_stats} = old_weapon
 
             new_items = [
               %Item{
@@ -900,7 +897,7 @@ defmodule Roguelike do
   end
 
   def update_effects(state) do
-    state =
+    new_state =
       if state.effects.turns_left > 0 do
         new_turns = state.effects.turns_left - 1
 
@@ -918,7 +915,7 @@ defmodule Roguelike do
       end
 
     {new_enemies, messages} =
-      Enum.map_reduce(state.enemies, state.messages, fn enemy, acc ->
+      Enum.map_reduce(new_state.enemies, new_state.messages, fn enemy, acc ->
         if enemy.dot_effect != nil and Entity.is_alive?(enemy) do
           dot = enemy.dot_effect
           {min_dmg, max_dmg} = dot.damage
@@ -940,11 +937,15 @@ defmodule Roguelike do
         end
       end)
 
-    state = %{state | enemies: new_enemies, messages: messages, turn_count: state.turn_count + 1}
+    new_state = %{
+      new_state
+      | enemies: new_enemies,
+        messages: messages,
+        turn_count: new_state.turn_count + 1
+    }
 
-    state =
-      Enum.reduce(state.items, state, fn item, acc ->
-        # Fix: != nil instead of and
+    new_state =
+      Enum.reduce(new_state.items, new_state, fn item, acc ->
         if item.damage_range != nil and acc.turn_count >= item.despawn_turn do
           %{
             acc
@@ -956,16 +957,16 @@ defmodule Roguelike do
         end
       end)
 
-    state =
-      if state.turn_count >= state.next_spawn_turn do
+    new_state =
+      if new_state.turn_count >= new_state.next_spawn_turn do
         available_types =
-          Enum.filter(@enemy_types, fn {_, stats} -> stats.min_level <= state.player_level end)
+          Enum.filter(@enemy_types, fn {_, stats} -> stats.min_level <= new_state.player_level end)
 
         enemy_type = Enum.random(available_types) |> elem(0)
         stats = @enemy_types[enemy_type]
         {min_hp, max_hp} = stats.hp_range
         hp = Enum.random(min_hp..max_hp)
-        pos = place_entity_in_room(state.rooms, state.player.pos)
+        pos = place_entity_in_room(new_state.rooms, new_state.player.pos)
 
         new_enemy = %Entity{
           pos: pos,
@@ -977,16 +978,16 @@ defmodule Roguelike do
         }
 
         %{
-          state
-          | enemies: [new_enemy | state.enemies],
-            next_spawn_turn: state.turn_count + Enum.random(@spawn_min..@spawn_max),
-            messages: ["A #{enemy_type} has appeared!"] ++ state.messages
+          new_state
+          | enemies: [new_enemy | new_state.enemies],
+            next_spawn_turn: new_state.turn_count + Enum.random(@spawn_min..@spawn_max),
+            messages: ["A #{enemy_type} has appeared!"] ++ new_state.messages
         }
       else
-        state
+        new_state
       end
 
-    if state.turn_count >= state.next_weapon_spawn_turn do
+    if new_state.turn_count >= new_state.next_weapon_spawn_turn do
       special_weapons =
         Enum.filter(@weapon_types, fn {_, v} -> v[:dot] || v[:area_effect] || v[:life_drain] end)
 
@@ -995,9 +996,8 @@ defmodule Roguelike do
           k not in Enum.map(special_weapons, &elem(&1, 0))
         end)
 
-      # Fix here too
       has_special =
-        Enum.any?(state.items, fn i ->
+        Enum.any?(new_state.items, fn i ->
           i.damage_range != nil and i.name in Enum.map(special_weapons, &elem(&1, 0))
         end)
 
@@ -1007,14 +1007,14 @@ defmodule Roguelike do
           else: Enum.random(regular_weapons) |> elem(0)
 
       stats = @weapon_types[weapon_name]
-      pos = place_entity_in_room(state.rooms, state.player.pos)
+      pos = place_entity_in_room(new_state.rooms, new_state.player.pos)
 
       new_item = %Item{
         pos: pos,
         name: weapon_name,
         symbol: stats.symbol,
-        spawn_turn: state.turn_count,
-        despawn_turn: state.turn_count + Enum.random(@weapon_spawn_min..@weapon_spawn_max),
+        spawn_turn: new_state.turn_count,
+        despawn_turn: new_state.turn_count + Enum.random(@weapon_spawn_min..@weapon_spawn_max),
         damage_range: stats.damage_range,
         dot: stats[:dot],
         area_effect: stats[:area_effect],
@@ -1022,14 +1022,14 @@ defmodule Roguelike do
       }
 
       %{
-        state
-        | items: [new_item | state.items],
+        new_state
+        | items: [new_item | new_state.items],
           next_weapon_spawn_turn:
-            state.turn_count + Enum.random(@weapon_spawn_min..@weapon_spawn_max),
-          messages: ["A #{weapon_name} has appeared!"] ++ state.messages
+            new_state.turn_count + Enum.random(@weapon_spawn_min..@weapon_spawn_max),
+          messages: ["A #{weapon_name} has appeared!"] ++ new_state.messages
       }
     else
-      state
+      new_state
     end
   end
 
