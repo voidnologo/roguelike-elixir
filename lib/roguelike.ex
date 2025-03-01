@@ -28,6 +28,8 @@ defmodule Roguelike do
   @dot_duration 3
   @special_weapon_chance 0.2
 
+  require Logger
+
   defmodule Position do
     defstruct x: 0, y: 0
 
@@ -188,11 +190,14 @@ defmodule Roguelike do
             old_pos = state.player.pos
             new_pos = Position.move(state.player.pos, dx, dy)
 
+            Logger.debug("Moving from #{inspect(old_pos)} to #{inspect(new_pos)}")
+
             if is_valid_move?(new_pos, state.map) do
               tile = state.map[new_pos.y][new_pos.x]
 
               # Clear old player position
               new_map = put_in_map(state.map, old_pos.y, old_pos.x, @floor)
+              Logger.debug("Old position cleared: #{inspect({old_pos.x, old_pos.y})} set to '.'")
 
               case tile do
                 @door_closed ->
@@ -235,7 +240,7 @@ defmodule Roguelike do
                   |> pickup_item(new_pos)
                   |> update_effects()
 
-                # Handle case where tile is an entity or item (shouldn't happen, but safeguard)
+                # Safeguard for unexpected tiles
                 _ ->
                   new_player = %{state.player | pos: new_pos}
 
@@ -255,6 +260,10 @@ defmodule Roguelike do
                   |> update_effects()
               end
             else
+              Logger.debug(
+                "Move blocked at #{inspect(new_pos)}: #{Map.get(state.map[new_pos.y], new_pos.x, "#")}"
+              )
+
               update_effects(state)
             end
 
@@ -454,7 +463,7 @@ defmodule Roguelike do
                   else: "None visible"
                 )
           }
-        ] ++ Enum.map(state.messages, fn msg -> %{content: msg} end)
+        ] ++ Enum.map(Enum.take(state.messages, -10), fn msg -> %{content: msg} end)
       )
 
     case state.mode do
@@ -503,9 +512,17 @@ defmodule Roguelike do
     map_with_rooms =
       Enum.reduce(rooms, map, fn room, acc ->
         Enum.reduce(room.y..(room.y + room.h - 1), acc, fn y, acc_y ->
-          Enum.reduce(room.x..(room.x + room.w - 1), acc_y, fn x, acc_x ->
-            Map.update!(acc_x, y, &Map.put(&1, x, @floor))
-          end)
+          if y >= 0 and y < @map_height do
+            Enum.reduce(room.x..(room.x + room.w - 1), acc_y, fn x, acc_x ->
+              if x >= 0 and x < @map_width do
+                Map.update!(acc_x, y, &Map.put(&1, x, @floor))
+              else
+                acc_x
+              end
+            end)
+          else
+            acc_y
+          end
         end)
       end)
 
@@ -514,19 +531,19 @@ defmodule Roguelike do
   end
 
   def split_space(x, y, w, h, depth) when depth <= 0 or w < 8 or h < 8 do
-    room_w = Enum.random(4..min(8, w - 2))
-    room_h = Enum.random(4..min(8, h - 2))
-    room_x = x + Enum.random(1..(w - room_w - 1))
-    room_y = y + Enum.random(1..(h - room_h - 1))
+    room_w = min(w - 2, Enum.random(4..8))
+    room_h = min(h - 2, Enum.random(4..8))
+    room_x = x + Enum.random(1..max(1, w - room_w - 1))
+    room_y = y + Enum.random(1..max(1, h - room_h - 1))
     [%Room{x: room_x, y: room_y, w: room_w, h: room_h}]
   end
 
   def split_space(x, y, w, h, depth) do
-    if Enum.random([true, false]) and w > h do
-      split = Enum.random(4..(w - 4))
+    if w >= h and w >= 8 do
+      split = Enum.random(4..max(4, w - 4))
       split_space(x, y, split, h, depth - 1) ++ split_space(x + split, y, w - split, h, depth - 1)
     else
-      split = Enum.random(4..(h - 4))
+      split = Enum.random(4..max(4, h - 4))
       split_space(x, y, w, split, depth - 1) ++ split_space(x, y + split, w, h - split, depth - 1)
     end
   end
@@ -707,12 +724,13 @@ defmodule Roguelike do
         new_state =
           if weapon_stats[:dot] != nil and Entity.is_alive?(new_defender) do
             dot = weapon_stats[:dot]
+            {min_dmg, max_dmg} = dot.damage
 
             new_defender = %{
               new_defender
               | dot_effect: %{
                   type: dot.type,
-                  damage: Enum.random(dot.damage),
+                  damage: Enum.random(min_dmg..max_dmg),
                   turns_left: dot.duration
                 }
             }
@@ -834,18 +852,22 @@ defmodule Roguelike do
       else
         acc =
           if acc.inventory.weapon do
+            # Find the old weapon's stats
             old_weapon =
               Enum.find(@weapon_types, fn {_, v} -> v.damage_range == acc.player.damage_range end)
+
+            # Destructure the tuple correctly
+            {old_weapon_name, old_weapon_stats} = old_weapon
 
             new_items = [
               %Item{
                 pos: acc.player.pos,
-                name: elem(old_weapon, 0),
-                symbol: old_weapon[1].symbol,
+                name: old_weapon_name,
+                symbol: old_weapon_stats.symbol,
                 spawn_turn: acc.turn_count,
                 despawn_turn:
                   acc.turn_count + Enum.random(@weapon_despawn_min..@weapon_despawn_max),
-                damage_range: old_weapon[1].damage_range
+                damage_range: old_weapon_stats.damage_range
               }
               | acc.items
             ]
@@ -853,7 +875,7 @@ defmodule Roguelike do
             %{
               acc
               | items: new_items,
-                messages: ["Dropped #{elem(old_weapon, 0)}."] ++ acc.messages
+                messages: ["Dropped #{old_weapon_name}."] ++ acc.messages
             }
           else
             acc
@@ -992,7 +1014,7 @@ defmodule Roguelike do
         name: weapon_name,
         symbol: stats.symbol,
         spawn_turn: state.turn_count,
-        despawn_turn: state.turn_count + Enum.random(@weapon_despawn_min..@weapon_despawn_max),
+        despawn_turn: state.turn_count + Enum.random(@weapon_spawn_min..@weapon_spawn_max),
         damage_range: stats.damage_range,
         dot: stats[:dot],
         area_effect: stats[:area_effect],
