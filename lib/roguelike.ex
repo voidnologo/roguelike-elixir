@@ -503,8 +503,9 @@ defmodule Roguelike do
 
     case state.mode do
       :game ->
-        user_lines = Enum.map(Enum.take(state.user_messages, -5), fn msg -> %{content: msg} end)
-        state_lines = Enum.map(Enum.take(state.state_messages, -5), fn msg -> %{content: msg} end)
+        # Changed from -5 to 5
+        user_lines = Enum.map(Enum.take(state.user_messages, 5), fn msg -> %{content: msg} end)
+        state_lines = Enum.map(Enum.take(state.state_messages, 5), fn msg -> %{content: msg} end)
 
         immediate_lines = [
           %{
@@ -819,9 +820,13 @@ defmodule Roguelike do
         }
 
     new_state =
-      if attacker == state.player or defender == state.player,
-        do: %{new_state | user_messages: [message | new_state.user_messages]},
-        else: new_state
+      if attacker == state.player or defender == state.player do
+        new_state_with_message = %{new_state | user_messages: [message | new_state.user_messages]}
+        Logger.debug("Combat message added: #{message}")
+        new_state_with_message
+      else
+        new_state
+      end
 
     new_state =
       if attacker == state.player and state.inventory.weapon != nil do
@@ -1087,7 +1092,8 @@ defmodule Roguelike do
     new_state = %{
       new_state
       | items: Enum.reverse(items),
-        user_messages: despawn_messages ++ new_state.user_messages
+        # Changed to state_messages
+        state_messages: despawn_messages ++ new_state.state_messages
     }
 
     # Enemy spawn
@@ -1115,7 +1121,8 @@ defmodule Roguelike do
           new_state
           | enemies: [new_enemy | new_state.enemies],
             next_spawn_turn: new_state.turn_count + Enum.random(@spawn_min..@spawn_max),
-            user_messages: ["A #{enemy_type} has appeared!" | new_state.user_messages]
+            # Changed to state_messages
+            state_messages: ["A #{enemy_type} has appeared!" | new_state.state_messages]
         }
       else
         new_state
@@ -1207,7 +1214,8 @@ defmodule Roguelike do
         | items: [new_item | new_state.items],
           next_weapon_spawn_turn:
             new_state.turn_count + Enum.random(@weapon_spawn_min..@weapon_spawn_max),
-          user_messages: ["A #{weapon_name} has appeared!" | new_state.user_messages]
+          # Changed to state_messages
+          state_messages: ["A #{weapon_name} has appeared!" | new_state.state_messages]
       }
     else
       new_state
