@@ -161,118 +161,140 @@ defmodule Roguelike do
       effects: %{damage_mult: 1.0, defense_mult: 1.0, turns_left: 0},
       current_weapon_effects: %{},
       messages: [],
-      mode: :game
+      mode: :game,
+      kills: 0,
+      total_damage: 0
     }
   end
 
   def update(state, msg) do
     case state.mode do
       :game ->
-        case msg do
-          {:event, %{ch: ?q}} ->
-            %{state | running: false}
+        if not Entity.is_alive?(state.player) do
+          %{state | mode: :dead, messages: ["You Died!" | state.messages]}
+        else
+          case msg do
+            {:event, %{ch: ?q}} ->
+              %{state | running: false}
 
-          {:event, %{ch: ?i}} when state.player.hp > 0 ->
-            inspect_inventory(state)
+            {:event, %{ch: ?i}} when state.player.hp > 0 ->
+              inspect_inventory(state)
 
-          {:event, %{ch: ?u}} when state.player.hp > 0 ->
-            %{state | mode: :potion_menu}
+            {:event, %{ch: ?u}} when state.player.hp > 0 ->
+              %{state | mode: :potion_menu}
 
-          {:event, %{key: key}} when key in [?w, ?s, ?a, ?d] and state.player.hp > 0 ->
-            {dx, dy} =
-              case key do
-                ?w -> {0, -1}
-                ?s -> {0, 1}
-                ?a -> {-1, 0}
-                ?d -> {1, 0}
-              end
+            {:event, %{key: key}} when key in [?w, ?s, ?a, ?d] and state.player.hp > 0 ->
+              {dx, dy} =
+                case key do
+                  ?w -> {0, -1}
+                  ?s -> {0, 1}
+                  ?a -> {-1, 0}
+                  ?d -> {1, 0}
+                end
 
-            old_pos = state.player.pos
-            new_pos = Position.move(state.player.pos, dx, dy)
+              old_pos = state.player.pos
+              new_pos = Position.move(state.player.pos, dx, dy)
 
-            Logger.debug("Attempting move from #{inspect(old_pos)} to #{inspect(new_pos)}")
+              Logger.debug("Attempting move from #{inspect(old_pos)} to #{inspect(new_pos)}")
 
-            if is_valid_move?(new_pos, state.map) do
-              # Check for enemy at new position
-              enemy_at_new_pos =
-                Enum.find(state.enemies, fn e ->
-                  e.pos == new_pos and Entity.is_alive?(e)
-                end)
+              if is_valid_move?(new_pos, state.map) do
+                enemy_at_new_pos =
+                  Enum.find(state.enemies, fn e ->
+                    e.pos == new_pos and Entity.is_alive?(e)
+                  end)
 
-              if enemy_at_new_pos do
-                # Enemy present, attack without moving
-                Logger.debug("Attacking enemy #{enemy_at_new_pos.symbol} at #{inspect(new_pos)}")
+                explored =
+                  Enum.reduce(0..(@map_height - 1), state.explored, fn y, acc ->
+                    Enum.reduce(0..(@map_width - 1), acc, fn x, acc_inner ->
+                      pos = %Position{x: x, y: y}
 
-                combat(state, state.player, enemy_at_new_pos)
-                |> update_effects()
+                      if is_visible?(state.player.pos, pos, state.map),
+                        do: MapSet.put(acc_inner, {x, y}),
+                        else: acc_inner
+                    end)
+                  end)
+
+                new_state = %{state | explored: explored}
+
+                if enemy_at_new_pos do
+                  Logger.debug(
+                    "Attacking enemy #{enemy_at_new_pos.symbol} at #{inspect(new_pos)}"
+                  )
+
+                  combat(new_state, new_state.player, enemy_at_new_pos)
+                  |> update_effects()
+                else
+                  new_map = put_in_map(new_state.map, old_pos.y, old_pos.x, @floor)
+
+                  Logger.debug(
+                    "Old position cleared: #{inspect({old_pos.x, old_pos.y})} set to '.'"
+                  )
+
+                  tile = new_state.map[new_pos.y][new_pos.x]
+
+                  case tile do
+                    @door_closed ->
+                      new_map = put_in_map(new_map, new_pos.y, new_pos.x, @door_open)
+                      update_effects(%{new_state | map: new_map})
+
+                    @door_open ->
+                      new_player = %{new_state.player | pos: new_pos}
+                      new_state = %{new_state | map: new_map, player: new_player}
+
+                      new_state
+                      |> pickup_item(new_pos)
+                      |> update_effects()
+
+                    @floor ->
+                      new_player = %{new_state.player | pos: new_pos}
+                      new_state = %{new_state | map: new_map, player: new_player}
+
+                      new_state
+                      |> pickup_item(new_pos)
+                      |> update_effects()
+
+                    _ ->
+                      new_player = %{new_state.player | pos: new_pos}
+                      new_state = %{new_state | map: new_map, player: new_player}
+
+                      new_state
+                      |> pickup_item(new_pos)
+                      |> update_effects()
+                  end
+                end
               else
-                # No enemy, proceed with move
-                new_map = put_in_map(state.map, old_pos.y, old_pos.x, @floor)
-
                 Logger.debug(
-                  "Old position cleared: #{inspect({old_pos.x, old_pos.y})} set to '.'"
+                  "Move blocked at #{inspect(new_pos)}: #{Map.get(state.map[new_pos.y], new_pos.x, "#")}"
                 )
 
-                tile = state.map[new_pos.y][new_pos.x]
+                explored =
+                  Enum.reduce(0..(@map_height - 1), state.explored, fn y, acc ->
+                    Enum.reduce(0..(@map_width - 1), acc, fn x, acc_inner ->
+                      pos = %Position{x: x, y: y}
 
-                case tile do
-                  @door_closed ->
-                    new_map = put_in_map(new_map, new_pos.y, new_pos.x, @door_open)
-                    update_effects(%{state | map: new_map})
+                      if is_visible?(state.player.pos, pos, state.map),
+                        do: MapSet.put(acc_inner, {x, y}),
+                        else: acc_inner
+                    end)
+                  end)
 
-                  @door_open ->
-                    new_player = %{state.player | pos: new_pos}
-
-                    new_state = %{
-                      state
-                      | map: new_map,
-                        player: new_player,
-                        explored: MapSet.put(state.explored, {new_pos.x, new_pos.y})
-                    }
-
-                    new_state
-                    |> pickup_item(new_pos)
-                    |> update_effects()
-
-                  @floor ->
-                    new_player = %{state.player | pos: new_pos}
-
-                    new_state = %{
-                      state
-                      | map: new_map,
-                        player: new_player,
-                        explored: MapSet.put(state.explored, {new_pos.x, new_pos.y})
-                    }
-
-                    new_state
-                    |> pickup_item(new_pos)
-                    |> update_effects()
-
-                  _ ->
-                    new_player = %{state.player | pos: new_pos}
-
-                    new_state = %{
-                      state
-                      | map: new_map,
-                        player: new_player,
-                        explored: MapSet.put(state.explored, {new_pos.x, new_pos.y})
-                    }
-
-                    new_state
-                    |> pickup_item(new_pos)
-                    |> update_effects()
-                end
+                update_effects(%{state | explored: explored})
               end
-            else
-              Logger.debug(
-                "Move blocked at #{inspect(new_pos)}: #{Map.get(state.map[new_pos.y], new_pos.x, "#")}"
-              )
 
-              update_effects(state)
-            end
+            _ ->
+              explored =
+                Enum.reduce(0..(@map_height - 1), state.explored, fn y, acc ->
+                  Enum.reduce(0..(@map_width - 1), acc, fn x, acc_inner ->
+                    pos = %Position{x: x, y: y}
 
-          _ ->
-            update_effects(state)
+                    if is_visible?(state.player.pos, pos, state.map),
+                      do: MapSet.put(acc_inner, {x, y}),
+                      else: acc_inner
+                  end)
+                end)
+
+              update_effects(%{state | explored: explored})
+          end
         end
 
       :potion_menu ->
@@ -331,6 +353,15 @@ defmodule Roguelike do
 
           _ ->
             %{state | messages: ["Cancelled."], mode: :game}
+        end
+
+      :dead ->
+        case msg do
+          {:event, %{ch: ?q}} ->
+            %{state | running: false}
+
+          _ ->
+            state
         end
     end
   end
@@ -406,14 +437,15 @@ defmodule Roguelike do
         row =
           for x <- 0..(@map_width - 1), into: "" do
             pos = %Position{x: x, y: y}
-            tile = render_map[y][x]
+            base_tile = state.map[y][x]
+            render_tile = render_map[y][x]
 
             cond do
               pos == state.player.pos ->
                 "#{@yellow}#{@player}#{@reset}"
 
-              is_visible?(state.player.pos, pos, render_map) ->
-                case tile do
+              is_visible?(state.player.pos, pos, state.map) ->
+                case render_tile do
                   symbol when symbol in @enemy_symbols ->
                     "#{@red}#{symbol}#{@reset}"
 
@@ -428,14 +460,20 @@ defmodule Roguelike do
                     "#{@green}#{symbol}#{@reset}"
 
                   @wall ->
-                    "#{@gray}#{tile}#{@reset}"
+                    "#{@gray}#{base_tile}#{@reset}"
 
                   _ ->
-                    tile
+                    base_tile
                 end
 
               MapSet.member?(state.explored, {x, y}) ->
-                if tile == @wall, do: "#{@gray}#{tile}#{@reset}", else: tile
+                case base_tile do
+                  @wall -> "#{@gray}#{base_tile}#{@reset}"
+                  @floor -> base_tile
+                  @door_closed -> base_tile
+                  @door_open -> base_tile
+                  _ -> @fog
+                end
 
               true ->
                 @fog
@@ -445,33 +483,47 @@ defmodule Roguelike do
         %{content: row}
       end
 
-    status_lines =
-      Enum.reverse(
-        [
-          %{
-            content:
-              "Player: Level #{state.player_level} (XP: #{state.player_xp}) HP: #{state.player.hp}/#{state.player.max_hp}  Enemies: #{enemy_hp || "None"}"
-          },
-          %{content: "Potions: #{length(state.inventory.potions)}  #{effects_str}"},
-          %{
-            content:
-              "Next spawn in #{state.next_spawn_turn - state.turn_count} turns  Next weapon spawn in #{state.next_weapon_spawn_turn - state.turn_count} turns"
-          },
-          %{content: "Controls: WASD to move, I to inspect, U to use potion, Q to quit"},
-          %{
-            content:
-              legend <>
-                if(symbol_meanings != [],
-                  do: Enum.join(symbol_meanings, ", "),
-                  else: "None visible"
-                )
-          }
-        ] ++ Enum.map(Enum.take(state.messages, -10), fn msg -> %{content: msg} end)
-      )
-
     case state.mode do
       :game ->
+        status_lines =
+          Enum.reverse(
+            [
+              %{
+                content:
+                  "Player: Level #{state.player_level} (XP: #{state.player_xp}) HP: #{state.player.hp}/#{state.player.max_hp}  Enemies: #{enemy_hp || "None"}"
+              },
+              %{content: "Potions: #{length(state.inventory.potions)}  #{effects_str}"},
+              %{
+                content:
+                  "Next spawn in #{state.next_spawn_turn - state.turn_count} turns  Next weapon spawn in #{state.next_weapon_spawn_turn - state.turn_count} turns"
+              },
+              %{content: "Controls: WASD to move, I to inspect, U to use potion, Q to quit"},
+              %{
+                content:
+                  legend <>
+                    if(symbol_meanings != [],
+                      do: Enum.join(symbol_meanings, ", "),
+                      else: "None visible"
+                    )
+              }
+            ] ++ Enum.map(Enum.take(state.messages, -10), fn msg -> %{content: msg} end)
+          )
+
         map_lines ++ status_lines
+
+      :dead ->
+        end_screen_lines = [
+          %{content: "You Died!"},
+          %{content: "Final Stats:"},
+          %{content: "Kills: #{state.kills}"},
+          %{content: "Total Damage Dealt: #{state.total_damage}"},
+          %{content: "XP Earned: #{state.player_xp}"},
+          %{content: "Level Reached: #{state.player_level}"},
+          %{content: "Turns Survived: #{state.turn_count}"},
+          %{content: "Press Q to quit"}
+        ]
+
+        map_lines ++ end_screen_lines
 
       :potion_menu ->
         potion_lines =
@@ -491,6 +543,29 @@ defmodule Roguelike do
 
             %{content: "#{i}. #{potion.name} (#{effect})"}
           end)
+
+        status_lines =
+          Enum.reverse(
+            [
+              %{
+                content:
+                  "Player: Level #{state.player_level} (XP: #{state.player_xp}) HP: #{state.player.hp}/#{state.player.max_hp}  Enemies: #{enemy_hp || "None"}"
+              },
+              %{content: "Potions: #{length(state.inventory.potions)}  #{effects_str}"},
+              %{
+                content:
+                  "Next spawn in #{state.next_spawn_turn - state.turn_count} turns  Next weapon spawn in #{state.next_weapon_spawn_turn - state.turn_count} turns"
+              },
+              %{
+                content:
+                  legend <>
+                    if(symbol_meanings != [],
+                      do: Enum.join(symbol_meanings, ", "),
+                      else: "None visible"
+                    )
+              }
+            ] ++ Enum.map(Enum.take(state.messages, -10), fn msg -> %{content: msg} end)
+          )
 
         [
           %{
@@ -795,15 +870,34 @@ defmodule Roguelike do
         new_state
       end
 
-    new_state = %{new_state | messages: [message] ++ new_state.messages}
+    new_state =
+      if attacker == state.player,
+        do: %{new_state | total_damage: new_state.total_damage + reduced_damage},
+        else: new_state
 
-    if not Entity.is_alive?(new_defender) and new_defender != state.player do
-      new_xp = new_state.player_xp + new_defender.xp_value
+    new_state = %{new_state | messages: [message | new_state.messages]}
 
-      new_messages =
-        ["Gained #{new_defender.xp_value} XP! Total XP: #{new_xp}"] ++ new_state.messages
+    if not Entity.is_alive?(new_defender) do
+      if new_defender == state.player do
+        %{
+          new_state
+          | mode: :dead,
+            messages: ["You Died!" | new_state.messages]
+        }
+      else
+        new_xp = new_state.player_xp + new_defender.xp_value
+        new_kills = new_state.kills + 1
 
-      check_level_up(%{new_state | player_xp: new_xp, messages: new_messages})
+        new_messages =
+          ["Gained #{new_defender.xp_value} XP! Total XP: #{new_xp}" | new_state.messages]
+
+        check_level_up(%{
+          new_state
+          | player_xp: new_xp,
+            kills: new_kills,
+            messages: new_messages
+        })
+      end
     else
       new_state
     end
@@ -987,6 +1081,51 @@ defmodule Roguelike do
         new_state
       end
 
+    new_state =
+      Enum.reduce(new_state.enemies, new_state, fn enemy, acc ->
+        if Entity.is_alive?(enemy) do
+          if is_visible?(enemy.pos, acc.player.pos, acc.map) do
+            direction = get_direction_toward(enemy.pos, acc.player.pos)
+            new_pos = Position.move(enemy.pos, direction.dx, direction.dy)
+
+            if new_pos == acc.player.pos do
+              combat(acc, enemy, acc.player)
+            else
+              if is_valid_move?(new_pos, acc.map) and
+                   not Enum.any?(acc.enemies, fn e -> e.pos == new_pos and Entity.is_alive?(e) end) do
+                %{
+                  acc
+                  | enemies:
+                      Enum.map(acc.enemies, fn e ->
+                        if e == enemy, do: %{e | pos: new_pos}, else: e
+                      end)
+                }
+              else
+                acc
+              end
+            end
+          else
+            direction = Enum.random([{0, 1}, {0, -1}, {1, 0}, {-1, 0}])
+            new_pos = Position.move(enemy.pos, elem(direction, 0), elem(direction, 1))
+
+            if is_valid_move?(new_pos, acc.map) and
+                 not Enum.any?(acc.enemies, fn e -> e.pos == new_pos and Entity.is_alive?(e) end) do
+              %{
+                acc
+                | enemies:
+                    Enum.map(acc.enemies, fn e ->
+                      if e == enemy, do: %{e | pos: new_pos}, else: e
+                    end)
+              }
+            else
+              acc
+            end
+          end
+        else
+          acc
+        end
+      end)
+
     if new_state.turn_count >= new_state.next_weapon_spawn_turn do
       special_weapons =
         Enum.filter(@weapon_types, fn {_, v} -> v[:dot] || v[:area_effect] || v[:life_drain] end)
@@ -1031,6 +1170,26 @@ defmodule Roguelike do
     else
       new_state
     end
+  end
+
+  defp get_direction_toward(enemy_pos, player_pos) do
+    dx =
+      cond do
+        player_pos.x > enemy_pos.x -> 1
+        player_pos.x < enemy_pos.x -> -1
+        true -> 0
+      end
+
+    dy =
+      cond do
+        player_pos.y > enemy_pos.y -> 1
+        player_pos.y < enemy_pos.y -> -1
+        true -> 0
+      end
+
+    if dx != 0 and dy != 0 and :rand.uniform() < 0.5,
+      do: %{dx: dx, dy: 0},
+      else: %{dx: 0, dy: dy}
   end
 
   def inspect_inventory(state) do
