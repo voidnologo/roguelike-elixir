@@ -5,7 +5,7 @@ defmodule Roguelike.MixProject do
     [
       app: :roguelike,
       version: "0.1.0",
-      elixir: "~> 1.18",
+      elixir: "~> 1.17",
       start_permanent: Mix.env() == :prod,
       deps: deps()
     ]
@@ -19,7 +19,6 @@ defmodule Roguelike.MixProject do
   end
 
   defp deps do
-    # No external dependencies!
     []
   end
 end

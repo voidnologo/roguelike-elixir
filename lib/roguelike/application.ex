@@ -1,11 +1,7 @@
 defmodule Roguelike.Application do
   use Application
 
-  require Logger
-
   def start(_type, _args) do
-    Logger.info("Starting Roguelike application")
-
     children = [
       {Roguelike.GameServer, []}
     ]
