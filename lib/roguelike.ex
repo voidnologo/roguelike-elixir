@@ -160,7 +160,8 @@ defmodule Roguelike do
       inventory: %{weapon: nil, potions: []},
       effects: %{damage_mult: 1.0, defense_mult: 1.0, turns_left: 0},
       current_weapon_effects: %{},
-      messages: [],
+      user_messages: [],
+      state_messages: [],
       mode: :game,
       kills: 0,
       total_damage: 0
@@ -171,14 +172,15 @@ defmodule Roguelike do
     case state.mode do
       :game ->
         if not Entity.is_alive?(state.player) do
-          %{state | mode: :dead, messages: ["You Died!" | state.messages]}
+          %{state | mode: :dead, user_messages: ["You Died!" | state.user_messages]}
         else
           case msg do
             {:event, %{ch: ?q}} ->
               %{state | running: false}
 
             {:event, %{ch: ?i}} when state.player.hp > 0 ->
-              inspect_inventory(state)
+              new_state = inspect_inventory(state)
+              %{new_state | mode: :inventory}
 
             {:event, %{ch: ?u}} when state.player.hp > 0 ->
               %{state | mode: :potion_menu}
@@ -240,26 +242,17 @@ defmodule Roguelike do
                     @door_open ->
                       new_player = %{new_state.player | pos: new_pos}
                       new_state = %{new_state | map: new_map, player: new_player}
-
-                      new_state
-                      |> pickup_item(new_pos)
-                      |> update_effects()
+                      new_state |> pickup_item(new_pos) |> update_effects()
 
                     @floor ->
                       new_player = %{new_state.player | pos: new_pos}
                       new_state = %{new_state | map: new_map, player: new_player}
-
-                      new_state
-                      |> pickup_item(new_pos)
-                      |> update_effects()
+                      new_state |> pickup_item(new_pos) |> update_effects()
 
                     _ ->
                       new_player = %{new_state.player | pos: new_pos}
                       new_state = %{new_state | map: new_map, player: new_player}
-
-                      new_state
-                      |> pickup_item(new_pos)
-                      |> update_effects()
+                      new_state |> pickup_item(new_pos) |> update_effects()
                   end
                 end
               else
@@ -297,10 +290,22 @@ defmodule Roguelike do
           end
         end
 
+      :inventory ->
+        case msg do
+          {:event, %{ch: ?i}} ->
+            Logger.debug("Exiting inventory mode")
+            %{state | mode: :game, user_messages: []}
+
+          _ ->
+            Logger.debug("Ignoring input in inventory mode: #{inspect(msg)}")
+            state
+        end
+
       :potion_menu ->
         case msg do
           {:event, %{ch: ch}} when ch in ?1..?9 ->
             index = ch - ?1
+            Logger.debug("Potion selection: #{ch} (index: #{index})")
 
             if index < length(state.inventory.potions) do
               {potion, new_potions} = List.pop_at(state.inventory.potions, index)
@@ -319,40 +324,53 @@ defmodule Roguelike do
                       state
                       | player: new_player,
                         inventory: %{state.inventory | potions: new_potions},
-                        messages: [
+                        user_messages: [
                           "Used #{potion.name}! Restored #{heal} HP. (#{new_player.hp}/#{new_player.max_hp})"
+                          | state.user_messages
                         ]
                     }
 
                   %{damage_mult: mult, duration: dur} ->
+                    new_effects = Map.merge(state.effects, %{damage_mult: mult, turns_left: dur})
+
                     %{
                       state
-                      | effects: %{state.effects | damage_mult: mult, turns_left: dur},
+                      | effects: new_effects,
                         inventory: %{state.inventory | potions: new_potions},
-                        messages: [
+                        user_messages: [
                           "Used #{potion.name}! Damage increased to x#{mult} for #{dur} turns."
+                          | state.user_messages
                         ]
                     }
 
                   %{defense_mult: mult, duration: dur} ->
+                    new_effects = Map.merge(state.effects, %{defense_mult: mult, turns_left: dur})
+
                     %{
                       state
-                      | effects: %{state.effects | defense_mult: mult, turns_left: dur},
+                      | effects: new_effects,
                         inventory: %{state.inventory | potions: new_potions},
-                        messages: [
+                        user_messages: [
                           "Used #{potion.name}! Damage reduced to x#{mult} for #{dur} turns."
+                          | state.user_messages
                         ]
                     }
                 end
 
-              :timer.sleep(1000)
+              Logger.debug("Potion applied, transitioning to :game mode")
               %{new_state | mode: :game}
             else
-              %{state | messages: ["Invalid choice."], mode: :game}
+              Logger.debug("Invalid potion choice: #{index}")
+              %{state | user_messages: ["Invalid choice." | state.user_messages], mode: :game}
             end
 
+          {:event, %{ch: ch}} when ch in [?u, ?q] ->
+            Logger.debug("Potion menu cancelled")
+            %{state | user_messages: ["Cancelled." | state.user_messages], mode: :game}
+
           _ ->
-            %{state | messages: ["Cancelled."], mode: :game}
+            Logger.debug("Ignoring input in potion menu: #{inspect(msg)}")
+            state
         end
 
       :dead ->
@@ -368,16 +386,16 @@ defmodule Roguelike do
 
   def render_game(state) do
     render_map =
-      Enum.reduce(state.enemies, state.map, fn enemy, acc ->
-        if Entity.is_alive?(enemy) and is_visible?(state.player.pos, enemy.pos, acc),
-          do: put_in_map(acc, enemy.pos.y, enemy.pos.x, enemy.symbol),
+      Enum.reduce(state.items, state.map, fn item, acc ->
+        if is_visible?(state.player.pos, item.pos, acc),
+          do: put_in_map(acc, item.pos.y, item.pos.x, item.symbol),
           else: acc
       end)
 
     render_map =
-      Enum.reduce(state.items, render_map, fn item, acc ->
-        if is_visible?(state.player.pos, item.pos, acc),
-          do: put_in_map(acc, item.pos.y, item.pos.x, item.symbol),
+      Enum.reduce(state.enemies, render_map, fn enemy, acc ->
+        if Entity.is_alive?(enemy) and is_visible?(state.player.pos, enemy.pos, acc),
+          do: put_in_map(acc, enemy.pos.y, enemy.pos.x, enemy.symbol),
           else: acc
       end)
 
@@ -389,7 +407,7 @@ defmodule Roguelike do
     effects_str =
       if state.effects.turns_left > 0,
         do:
-          "Effects: Dmg x#{state.effects.damage_mult}, Def x#{state.effects.defense_mult} (#{state.effects.turns_left} turns)",
+          "Effects: Dmg x#{state.effects.damage_mult || 1.0}, Def x#{state.effects.defense_mult || 1.0} (#{state.effects.turns_left} turns)",
         else: "Effects: None"
 
     legend = "Symbols: "
@@ -485,31 +503,33 @@ defmodule Roguelike do
 
     case state.mode do
       :game ->
-        status_lines =
-          Enum.reverse(
-            [
-              %{
-                content:
-                  "Player: Level #{state.player_level} (XP: #{state.player_xp}) HP: #{state.player.hp}/#{state.player.max_hp}  Enemies: #{enemy_hp || "None"}"
-              },
-              %{content: "Potions: #{length(state.inventory.potions)}  #{effects_str}"},
-              %{
-                content:
-                  "Next spawn in #{state.next_spawn_turn - state.turn_count} turns  Next weapon spawn in #{state.next_weapon_spawn_turn - state.turn_count} turns"
-              },
-              %{content: "Controls: WASD to move, I to inspect, U to use potion, Q to quit"},
-              %{
-                content:
-                  legend <>
-                    if(symbol_meanings != [],
-                      do: Enum.join(symbol_meanings, ", "),
-                      else: "None visible"
-                    )
-              }
-            ] ++ Enum.map(Enum.take(state.messages, -10), fn msg -> %{content: msg} end)
-          )
+        user_lines = Enum.map(Enum.take(state.user_messages, -5), fn msg -> %{content: msg} end)
+        state_lines = Enum.map(Enum.take(state.state_messages, -5), fn msg -> %{content: msg} end)
 
-        map_lines ++ status_lines
+        immediate_lines = [
+          %{
+            content:
+              "Player: Level #{state.player_level} (XP: #{state.player_xp}) HP: #{state.player.hp}/#{state.player.max_hp}  Enemies: #{enemy_hp || "None"}"
+          },
+          %{content: "Potions: #{length(state.inventory.potions)}  #{effects_str}"},
+          %{
+            content:
+              "Next spawn in #{state.next_spawn_turn - state.turn_count} turns  Next weapon spawn in #{state.next_weapon_spawn_turn - state.turn_count} turns"
+          },
+          %{content: "Controls: WASD to move, I to inspect, U to use potion, Q to quit"},
+          %{
+            content:
+              legend <>
+                if(symbol_meanings != [],
+                  do: Enum.join(symbol_meanings, ", "),
+                  else: "None visible"
+                )
+          }
+        ]
+
+        map_lines ++
+          user_lines ++
+          [%{content: "----"}] ++ state_lines ++ [%{content: "----"}] ++ immediate_lines
 
       :dead ->
         end_screen_lines = [
@@ -524,6 +544,15 @@ defmodule Roguelike do
         ]
 
         map_lines ++ end_screen_lines
+
+      :inventory ->
+        user_lines = Enum.map(Enum.take(state.user_messages, -5), fn msg -> %{content: msg} end)
+
+        immediate_lines = [
+          %{content: "Press I to return to game"}
+        ]
+
+        map_lines ++ user_lines ++ [%{content: "----"}] ++ immediate_lines
 
       :potion_menu ->
         potion_lines =
@@ -545,32 +574,29 @@ defmodule Roguelike do
           end)
 
         status_lines =
-          Enum.reverse(
-            [
-              %{
-                content:
-                  "Player: Level #{state.player_level} (XP: #{state.player_xp}) HP: #{state.player.hp}/#{state.player.max_hp}  Enemies: #{enemy_hp || "None"}"
-              },
-              %{content: "Potions: #{length(state.inventory.potions)}  #{effects_str}"},
-              %{
-                content:
-                  "Next spawn in #{state.next_spawn_turn - state.turn_count} turns  Next weapon spawn in #{state.next_weapon_spawn_turn - state.turn_count} turns"
-              },
-              %{
-                content:
-                  legend <>
-                    if(symbol_meanings != [],
-                      do: Enum.join(symbol_meanings, ", "),
-                      else: "None visible"
-                    )
-              }
-            ] ++ Enum.map(Enum.take(state.messages, -10), fn msg -> %{content: msg} end)
-          )
+          Enum.reverse([
+            %{
+              content:
+                "Player: Level #{state.player_level} (XP: #{state.player_xp}) HP: #{state.player.hp}/#{state.player.max_hp}  Enemies: #{enemy_hp || "None"}"
+            },
+            %{content: "Potions: #{length(state.inventory.potions)}  #{effects_str}"},
+            %{
+              content:
+                "Next spawn in #{state.next_spawn_turn - state.turn_count} turns  Next weapon spawn in #{state.next_weapon_spawn_turn - state.turn_count} turns"
+            },
+            %{
+              content:
+                legend <>
+                  if(symbol_meanings != [],
+                    do: Enum.join(symbol_meanings, ", "),
+                    else: "None visible"
+                  )
+            }
+          ])
 
         [
           %{
-            content:
-              "Use Potion (Select 1-#{length(state.inventory.potions)} or any key to cancel)"
+            content: "Use Potion (Select 1-#{length(state.inventory.potions)} or U/Q to cancel)"
           }
         ] ++ potion_lines ++ status_lines
     end
@@ -774,11 +800,10 @@ defmodule Roguelike do
   end
 
   def combat(state, attacker, defender) do
-    damage = round(Entity.get_damage(attacker.damage_range) * state.effects.damage_mult)
-
-    reduced_damage =
-      round(damage * if(defender == state.player, do: state.effects.defense_mult, else: 1.0))
-
+    damage_mult = state.effects.damage_mult || 1.0
+    defense_mult = state.effects.defense_mult || 1.0
+    damage = round(Entity.get_damage(attacker.damage_range) * damage_mult)
+    reduced_damage = round(damage * if(defender == state.player, do: defense_mult, else: 1.0))
     new_defender = Entity.take_damage(defender, reduced_damage)
 
     message =
@@ -792,6 +817,11 @@ defmodule Roguelike do
           | enemies:
               Enum.map(state.enemies, fn e -> if e == defender, do: new_defender, else: e end)
         }
+
+    new_state =
+      if attacker == state.player or defender == state.player,
+        do: %{new_state | user_messages: [message | new_state.user_messages]},
+        else: new_state
 
     new_state =
       if attacker == state.player and state.inventory.weapon != nil do
@@ -817,8 +847,10 @@ defmodule Roguelike do
             %{
               new_state
               | enemies: new_enemies,
-                messages:
-                  ["#{new_defender.symbol} is now affected by #{dot.type}!"] ++ new_state.messages
+                user_messages: [
+                  "#{new_defender.symbol} is now affected by #{dot.type}!"
+                  | new_state.user_messages
+                ]
             }
           else
             new_state
@@ -842,7 +874,12 @@ defmodule Roguelike do
 
             {enemies, area_messages} = Enum.unzip(new_enemies)
             area_messages = Enum.filter(area_messages, & &1)
-            %{new_state | enemies: enemies, messages: area_messages ++ new_state.messages}
+
+            %{
+              new_state
+              | enemies: enemies,
+                user_messages: area_messages ++ new_state.user_messages
+            }
           else
             new_state
           end
@@ -858,10 +895,10 @@ defmodule Roguelike do
           %{
             new_state
             | player: new_player,
-              messages:
-                [
-                  "#{attacker.symbol} drains #{heal} HP! (#{new_player.hp}/#{new_player.max_hp} HP)"
-                ] ++ new_state.messages
+              user_messages: [
+                "#{attacker.symbol} drains #{heal} HP! (#{new_player.hp}/#{new_player.max_hp} HP)"
+                | new_state.user_messages
+              ]
           }
         else
           new_state
@@ -875,27 +912,24 @@ defmodule Roguelike do
         do: %{new_state | total_damage: new_state.total_damage + reduced_damage},
         else: new_state
 
-    new_state = %{new_state | messages: [message | new_state.messages]}
-
     if not Entity.is_alive?(new_defender) do
       if new_defender == state.player do
-        %{
-          new_state
-          | mode: :dead,
-            messages: ["You Died!" | new_state.messages]
-        }
+        %{new_state | mode: :dead, user_messages: ["You Died!" | new_state.user_messages]}
       else
         new_xp = new_state.player_xp + new_defender.xp_value
         new_kills = new_state.kills + 1
 
-        new_messages =
-          ["Gained #{new_defender.xp_value} XP! Total XP: #{new_xp}" | new_state.messages]
+        new_messages = [
+          "#{attacker.symbol} has slain #{defender.symbol}!",
+          "Gained #{new_defender.xp_value} XP! Total XP: #{new_xp}"
+          | new_state.user_messages
+        ]
 
         check_level_up(%{
           new_state
           | player_xp: new_xp,
             kills: new_kills,
-            messages: new_messages
+            user_messages: new_messages
         })
       end
     else
@@ -912,7 +946,7 @@ defmodule Roguelike do
       new_damage_range = {min_dmg + 1, max_dmg + 1}
 
       message =
-        "Level Up! Level #{new_level} - HP: #{new_max_hp}, Damage: #{inspect(new_damage_range)}"
+        "Level Up! Reached Level #{new_level} - HP: #{new_max_hp}, Damage: #{inspect(new_damage_range)}"
 
       %{
         state
@@ -923,7 +957,7 @@ defmodule Roguelike do
               hp: new_max_hp,
               damage_range: new_damage_range
           },
-          messages: [message] ++ state.messages
+          user_messages: [message | state.user_messages]
       }
     else
       state
@@ -942,7 +976,7 @@ defmodule Roguelike do
         %{
           acc
           | inventory: %{acc.inventory | potions: new_potions},
-            messages: [message] ++ acc.messages
+            user_messages: [message | acc.user_messages]
         }
       else
         acc =
@@ -966,7 +1000,7 @@ defmodule Roguelike do
             %{
               acc
               | items: new_items,
-                messages: ["Dropped #{old_weapon_name}."] ++ acc.messages
+                user_messages: ["Dropped #{old_weapon_name}." | acc.user_messages]
             }
           else
             acc
@@ -984,13 +1018,14 @@ defmodule Roguelike do
               area_effect: item.area_effect,
               life_drain: item.life_drain
             },
-            messages: [message] ++ acc.messages
+            user_messages: [message | acc.user_messages]
         }
       end
     end)
   end
 
   def update_effects(state) do
+    # Potion effect decay
     new_state =
       if state.effects.turns_left > 0 do
         new_turns = state.effects.turns_left - 1
@@ -999,7 +1034,7 @@ defmodule Roguelike do
           %{
             state
             | effects: %{state.effects | damage_mult: 1.0, defense_mult: 1.0, turns_left: 0},
-              messages: ["Potion effects have worn off."] ++ state.messages
+              user_messages: ["Potion effects have worn off." | state.user_messages]
           }
         else
           %{state | effects: %{state.effects | turns_left: new_turns}}
@@ -1008,8 +1043,9 @@ defmodule Roguelike do
         state
       end
 
-    {new_enemies, messages} =
-      Enum.map_reduce(new_state.enemies, new_state.messages, fn enemy, acc ->
+    # DOT effects
+    {new_enemies, dot_messages} =
+      Enum.map_reduce(new_state.enemies, [], fn enemy, acc ->
         if enemy.dot_effect != nil and Entity.is_alive?(enemy) do
           dot = enemy.dot_effect
           {min_dmg, max_dmg} = dot.damage
@@ -1024,8 +1060,8 @@ defmodule Roguelike do
           if new_turns <= 0,
             do:
               {%{new_enemy | dot_effect: nil},
-               [msg, "#{enemy.symbol}'s #{dot.type} effect has ended."] ++ acc},
-            else: {%{new_enemy | dot_effect: %{dot | turns_left: new_turns}}, [msg] ++ acc}
+               [msg, "#{enemy.symbol}'s #{dot.type} effect has ended." | acc]},
+            else: {%{new_enemy | dot_effect: %{dot | turns_left: new_turns}}, [msg | acc]}
         else
           {enemy, acc}
         end
@@ -1034,23 +1070,27 @@ defmodule Roguelike do
     new_state = %{
       new_state
       | enemies: new_enemies,
-        messages: messages,
+        user_messages: dot_messages ++ new_state.user_messages,
         turn_count: new_state.turn_count + 1
     }
 
-    new_state =
-      Enum.reduce(new_state.items, new_state, fn item, acc ->
-        if item.damage_range != nil and acc.turn_count >= item.despawn_turn do
-          %{
-            acc
-            | items: List.delete(acc.items, item),
-              messages: ["A #{item.name} has despawned."] ++ acc.messages
-          }
+    # Item despawn
+    {items, despawn_messages} =
+      Enum.reduce(new_state.items, {[], []}, fn item, {items_acc, msg_acc} ->
+        if item.damage_range != nil and new_state.turn_count >= item.despawn_turn do
+          {items_acc, ["A #{item.name} has despawned." | msg_acc]}
         else
-          acc
+          {[item | items_acc], msg_acc}
         end
       end)
 
+    new_state = %{
+      new_state
+      | items: Enum.reverse(items),
+        user_messages: despawn_messages ++ new_state.user_messages
+    }
+
+    # Enemy spawn
     new_state =
       if new_state.turn_count >= new_state.next_spawn_turn do
         available_types =
@@ -1075,12 +1115,13 @@ defmodule Roguelike do
           new_state
           | enemies: [new_enemy | new_state.enemies],
             next_spawn_turn: new_state.turn_count + Enum.random(@spawn_min..@spawn_max),
-            messages: ["A #{enemy_type} has appeared!"] ++ new_state.messages
+            user_messages: ["A #{enemy_type} has appeared!" | new_state.user_messages]
         }
       else
         new_state
       end
 
+    # Enemy movement and combat
     new_state =
       Enum.reduce(new_state.enemies, new_state, fn enemy, acc ->
         if Entity.is_alive?(enemy) do
@@ -1126,6 +1167,7 @@ defmodule Roguelike do
         end
       end)
 
+    # Weapon spawn
     if new_state.turn_count >= new_state.next_weapon_spawn_turn do
       special_weapons =
         Enum.filter(@weapon_types, fn {_, v} -> v[:dot] || v[:area_effect] || v[:life_drain] end)
@@ -1165,7 +1207,7 @@ defmodule Roguelike do
         | items: [new_item | new_state.items],
           next_weapon_spawn_turn:
             new_state.turn_count + Enum.random(@weapon_spawn_min..@weapon_spawn_max),
-          messages: ["A #{weapon_name} has appeared!"] ++ new_state.messages
+          user_messages: ["A #{weapon_name} has appeared!" | new_state.user_messages]
       }
     else
       new_state
@@ -1241,7 +1283,6 @@ defmodule Roguelike do
             ["  - #{potion.name} (#{effect})" | acc]
           end)
 
-    :timer.sleep(2000)
-    %{state | messages: Enum.reverse(messages)}
+    %{state | user_messages: Enum.reverse(messages) ++ state.user_messages}
   end
 end

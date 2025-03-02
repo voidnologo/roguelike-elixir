@@ -25,6 +25,18 @@ defmodule Roguelike.GameServer do
 
   def handle_info(:poll_input, state) do
     case IO.getn(:stdio, "", 1) do
+      # Skip empty input (e.g., newline)
+      "" ->
+        Logger.debug("Skipping empty input")
+        Process.send_after(self(), :poll_input, 100)
+        {:noreply, state}
+
+      # Explicitly skip newline
+      "\n" ->
+        Logger.debug("Skipping newline input")
+        Process.send_after(self(), :poll_input, 100)
+        {:noreply, state}
+
       ch when ch in ["q", "Q"] ->
         IO.write("\e[2J\e[H")
         {:stop, :normal, state}
@@ -47,9 +59,21 @@ defmodule Roguelike.GameServer do
         Process.send_after(self(), :poll_input, 100)
         {:noreply, new_state}
 
-      _ ->
+      ch when ch in ["1", "2", "3", "4", "5", "6", "7", "8", "9"] ->
+        msg = {:event, %{ch: String.to_charlist(ch) |> hd}}
+        Logger.debug("Numeric input detected: #{ch}")
+        new_state = Roguelike.update(state, msg)
+        render(new_state)
         Process.send_after(self(), :poll_input, 100)
-        {:noreply, state}
+        {:noreply, new_state}
+
+      ch ->
+        msg = {:event, %{ch: String.to_charlist(ch) |> hd}}
+        Logger.debug("Other input detected: #{ch}")
+        new_state = Roguelike.update(state, msg)
+        render(new_state)
+        Process.send_after(self(), :poll_input, 100)
+        {:noreply, new_state}
     end
   end
 
