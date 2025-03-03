@@ -12,7 +12,6 @@ defmodule Roguelike.Core do
       hp: 20,
       max_hp: 20,
       symbol: "@",
-      # Base unarmed damage
       damage_range: {1, 3}
     }
 
@@ -201,6 +200,7 @@ defmodule Roguelike.Core do
       end)
 
     explored = MapSet.union(state.explored, new_visible)
+    Logger.debug("Updated ExploredTiles: #{inspect(explored)}")
     %{state | explored: explored}
   end
 
@@ -332,13 +332,14 @@ defmodule Roguelike.Core do
     dx = player_pos.x - enemy_pos.x
     dy = player_pos.y - enemy_pos.y
     distance = Entities.Position.distance_to(enemy_pos, player_pos)
+    is_orthogonal_adjacent = (dx == 0 and abs(dy) == 1) or (dy == 0 and abs(dx) == 1)
 
     cond do
-      # If rushing from last turn, move adjacent and attack
+      # If rushing from last turn, move to an orthogonal adjacent tile and attack
       enemy.rushing ->
         Logger.debug("#{enemy.symbol} rushes player from #{inspect(enemy_pos)}")
         new_enemy = %{enemy | rushing: false}
-        # Pick an adjacent tile
+        # Pick an orthogonal adjacent tile
         direction =
           if abs(dx) > abs(dy),
             do: if(dx > 0, do: %{dx: 1, dy: 0}, else: %{dx: -1, dy: 0}),
@@ -375,7 +376,7 @@ defmodule Roguelike.Core do
                   end)
             }
           else
-            Logger.debug("#{enemy.symbol} rush blocked, attacking from #{inspect(enemy_pos)}")
+            Logger.debug("#{enemy.symbol} rush blocked, staying at #{inspect(enemy_pos)}")
 
             %{
               state
@@ -384,14 +385,22 @@ defmodule Roguelike.Core do
             }
           end
 
-        Combat.combat(new_state, new_enemy, state.player)
+        # Only attack if orthogonally adjacent after moving
+        new_dx = player_pos.x - new_pos.x
+        new_dy = player_pos.y - new_pos.y
 
-      # If adjacent, attack immediately
-      distance <= 1 ->
+        if (new_dx == 0 and abs(new_dy) == 1) or (new_dy == 0 and abs(new_dx) == 1) do
+          Combat.combat(new_state, new_enemy, state.player)
+        else
+          new_state
+        end
+
+      # If orthogonally adjacent, attack immediately
+      is_orthogonal_adjacent ->
         Logger.debug("#{enemy.symbol} attacks player from #{inspect(enemy_pos)}")
         Combat.combat(state, enemy, state.player)
 
-      # If within 3 tiles, tense up for next turn's rush (increased from 2)
+      # If within 3 tiles, tense up for next turn's rush
       distance <= 3 ->
         Logger.debug("#{enemy.symbol} tenses up at #{inspect(enemy_pos)}, distance: #{distance}")
 
