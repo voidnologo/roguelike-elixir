@@ -1,7 +1,9 @@
 defmodule Roguelike.Render do
   alias Roguelike.Combat
   alias Roguelike.Entities
-  alias Roguelike.Map
+  alias Roguelike.GameMap
+
+  require Logger
 
   @reset "\e[0m"
   @red "\e[31m"
@@ -14,8 +16,13 @@ defmodule Roguelike.Render do
   @weapon_symbols Enum.map(Combat.weapon_types(), fn {_, stats} -> stats.symbol end)
 
   def render_game(state) do
-    render_map = render_items(state) |> render_enemies(state)
+    render_map = render_items(state) |> render_enemies(state) |> render_player(state)
     map_lines = build_map_lines(state, render_map)
+    Logger.debug("ExploredTiles: #{inspect(state.explored)}")
+
+    Logger.debug(
+      "BaseMapSample: #{inspect(for y <- 8..15, x <- 7..29, do: {{x, y}, state.map[y][x]})}"
+    )
 
     case state.mode do
       :game -> render_game_mode(state, map_lines)
@@ -27,18 +34,29 @@ defmodule Roguelike.Render do
 
   defp render_items(state) do
     Enum.reduce(state.items, state.map, fn item, acc ->
-      if Map.is_visible?(state.player.pos, item.pos, acc),
-        do: Map.put_in_map(acc, item.pos.y, item.pos.x, item.symbol),
-        else: acc
+      pos = item.pos
+
+      if MapSet.member?(state.explored, {pos.x, pos.y}) or
+           GameMap.is_visible?(state.player.pos, pos, acc),
+         do: GameMap.put_in_map(acc, pos.y, pos.x, item.symbol),
+         else: acc
     end)
   end
 
   defp render_enemies(render_map, state) do
     Enum.reduce(state.enemies, render_map, fn enemy, acc ->
-      if Entities.Entity.is_alive?(enemy) and Map.is_visible?(state.player.pos, enemy.pos, acc),
-        do: Map.put_in_map(acc, enemy.pos.y, enemy.pos.x, enemy.symbol),
-        else: acc
+      pos = enemy.pos
+
+      if Entities.Entity.is_alive?(enemy) and
+           (MapSet.member?(state.explored, {pos.x, pos.y}) or
+              GameMap.is_visible?(state.player.pos, pos, acc)),
+         do: GameMap.put_in_map(acc, pos.y, pos.x, enemy.symbol),
+         else: acc
     end)
+  end
+
+  defp render_player(render_map, state) do
+    GameMap.put_in_map(render_map, state.player.pos.y, state.player.pos.x, "@")
   end
 
   defp build_map_lines(state, render_map) do
@@ -51,7 +69,8 @@ defmodule Roguelike.Render do
           render_tile(pos, base_tile, render_tile, state)
         end
 
-      %{content: row}
+      Logger.debug("Row #{y}: #{inspect(row)}")
+      %{content: String.pad_trailing(row, 40)}
     end
   end
 
@@ -60,11 +79,11 @@ defmodule Roguelike.Render do
       pos == state.player.pos ->
         "#{@yellow}@#{@reset}"
 
-      Map.is_visible?(state.player.pos, pos, state.map) ->
-        render_visible_tile(render_tile)
+      GameMap.is_visible?(state.player.pos, pos, state.map) ->
+        render_visible_tile(render_tile || base_tile)
 
-      MapSet.member?(state.explored, {x, y}) ->
-        render_explored_tile(base_tile)
+      MapSet.member?(state.explored, {pos.x, pos.y}) ->
+        render_explored_tile(render_tile || base_tile)
 
       true ->
         " "
@@ -95,12 +114,16 @@ defmodule Roguelike.Render do
   end
 
   defp render_explored_tile(tile) do
-    case tile do
-      "#" -> "#{@gray}##{@reset}"
-      "." -> "."
-      "+" -> "+"
-      "/" -> "/"
-      _ -> " "
+    cond do
+      tile in @enemy_symbols -> "#{@gray}#{tile}#{@reset}"
+      tile in @weapon_symbols -> "#{@gray}#{tile}#{@reset}"
+      tile in ["h", "D", "F"] -> "#{@gray}#{tile}#{@reset}"
+      tile == "#" -> "#{@gray}##{@reset}"
+      tile == "." -> "."
+      tile == "+" -> "+"
+      tile == "/" -> "/"
+      # Only truly unknown tiles are blank
+      true -> " "
     end
   end
 
@@ -149,7 +172,7 @@ defmodule Roguelike.Render do
   defp build_legend(state) do
     visible_entities =
       Enum.filter(state.items ++ state.enemies, fn entity ->
-        Map.is_visible?(state.player.pos, entity.pos, state.map) and
+        GameMap.is_visible?(state.player.pos, entity.pos, state.map) and
           (match?(%Entities.Item{}, entity) or Entities.Entity.is_alive?(entity))
       end)
 

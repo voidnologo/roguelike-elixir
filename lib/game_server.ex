@@ -1,73 +1,80 @@
 defmodule Roguelike.GameServer do
   use GenServer
+  alias Roguelike.Core
+  alias Roguelike.Render
 
   require Logger
 
-  def start_link(_args) do
-    GenServer.start_link(__MODULE__, [], name: __MODULE__)
+  def start_link(_) do
+    GenServer.start_link(__MODULE__, :ok, name: __MODULE__)
   end
 
-  def init(_args) do
-    Logger.configure(level: :debug)
-    Logger.debug("Logger level set to debug")
-    Logger.info("Initializing GameServer")
-    IO.write("\e[2J\e[H")
-    map_data = Roguelike.generate_map()
-    state = Roguelike.init(map_data)
-    Roguelike.render_game(state)
-    Process.send_after(self(), :poll_input, 100)
+  def init(:ok) do
+    Logger.info("Starting GameServer")
+    map_data = Roguelike.GameMap.generate_map()
+    state = Core.init(map_data)
+    Logger.debug("Initial State Explored: #{inspect(state.explored)}")
+    server_pid = self()
+    Logger.debug("Server PID (game_server::init): #{inspect(server_pid)}")
+    render(state)
+    spawn_link(fn -> input_loop(server_pid) end)
     {:ok, state}
   end
 
-  def handle_info(:poll_input, state) do
-    case IO.getn(:stdio, "", 1) do
-      "" ->
-        Logger.debug("Skipping empty input")
-        Process.send_after(self(), :poll_input, 100)
-        {:noreply, state}
+  def handle_info({:input, input}, state) do
+    Logger.debug(
+      "Received input: #{inspect(input)}, Current State Explored: #{inspect(state.explored)}"
+    )
 
-      "\n" ->
-        Logger.debug("Skipping newline input")
-        Process.send_after(self(), :poll_input, 100)
-        {:noreply, state}
+    new_state =
+      case input do
+        "q" ->
+          Logger.info("Quitting game")
+          %{state | mode: :dead}
 
-      ch when ch in ["q", "Q"] ->
-        IO.write("\e[2J\e[H")
-        {:stop, :normal, state}
+        _ ->
+          # Use `key` to match Core.update/2
+          Core.update(state, {:event, %{key: String.to_charlist(input) |> hd}})
+      end
 
-      ch when ch in ["w", "s", "a", "d"] ->
-        msg = {:event, %{key: String.to_charlist(ch) |> hd}}
-        Logger.debug("Before update: #{inspect(state)}")
-        new_state = Roguelike.update(state, msg)
-        Logger.debug("State after update: #{inspect(new_state)}")
-        Roguelike.render_game(new_state)
-        Process.send_after(self(), :poll_input, 100)
-        {:noreply, new_state}
+    Logger.debug("New State Explored: #{inspect(new_state.explored)}")
+    render(new_state)
 
-      ch when ch in ["i", "u"] ->
-        msg = {:event, %{ch: String.to_charlist(ch) |> hd}}
-        Logger.debug("Before update: #{inspect(state)}")
-        new_state = Roguelike.update(state, msg)
-        Logger.debug("State after update: #{inspect(new_state)}")
-        Roguelike.render_game(new_state)
-        Process.send_after(self(), :poll_input, 100)
-        {:noreply, new_state}
-
-      ch when ch in ["1", "2", "3", "4", "5", "6", "7", "8", "9"] ->
-        msg = {:event, %{ch: String.to_charlist(ch) |> hd}}
-        Logger.debug("Numeric input detected: #{ch}")
-        new_state = Roguelike.update(state, msg)
-        Roguelike.render_game(new_state)
-        Process.send_after(self(), :poll_input, 100)
-        {:noreply, new_state}
-
-      ch ->
-        msg = {:event, %{ch: String.to_charlist(ch) |> hd}}
-        Logger.debug("Other input detected: #{ch}")
-        new_state = Roguelike.update(state, msg)
-        Roguelike.render_game(new_state)
-        Process.send_after(self(), :poll_input, 100)
-        {:noreply, new_state}
+    if new_state.mode == :dead do
+      Logger.info("Game over, stopping server")
+      {:stop, :normal, new_state}
+    else
+      {:noreply, new_state}
     end
+  end
+
+  def handle_info(msg, state) do
+    Logger.warning("Unexpected message: #{inspect(msg)}")
+    {:noreply, state}
+  end
+
+  defp input_loop(server_pid) do
+    input = IO.gets("") |> String.trim()
+    Logger.debug("Sending input to server: #{input}")
+    Logger.debug("Server PID (game_server::input_loop()): #{inspect(server_pid)}")
+    send(server_pid, {:input, input})
+
+    if input != "q" do
+      input_loop(server_pid)
+    else
+      Logger.debug("Input loop ending due to quit")
+    end
+  end
+
+  defp render(state) do
+    IO.write("\e[2J\e[H")
+    lines = Render.render_game(state)
+    Logger.debug("Render called with lines: #{inspect(Enum.map(lines, & &1.content))}")
+
+    Enum.each(lines, fn line ->
+      IO.puts(line.content)
+    end)
+
+    IO.write("")
   end
 end

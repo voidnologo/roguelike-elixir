@@ -1,6 +1,5 @@
 defmodule Roguelike.Combat do
   alias Roguelike.Entities
-  alias Roguelike.Items
 
   require Logger
 
@@ -48,7 +47,7 @@ defmodule Roguelike.Combat do
     |> calculate_damage(attacker, defender)
     |> apply_damage(attacker, defender)
     |> apply_weapon_effects(attacker, defender)
-    |> update_combat_stats(attacker)
+    |> (fn {state, _, reduced_damage} -> update_combat_stats(state, attacker, reduced_damage) end).()
     |> handle_combat_outcome(attacker, defender)
   end
 
@@ -90,12 +89,17 @@ defmodule Roguelike.Combat do
     if attacker == state.player and state.inventory.weapon != nil do
       weapon_stats = @weapon_types[state.inventory.weapon]
 
-      state
-      |> apply_dot_effect(new_defender, defender, weapon_stats)
-      |> apply_area_effect(new_defender, reduced_damage, weapon_stats)
-      |> apply_life_drain(reduced_damage, weapon_stats)
+      new_state =
+        state
+        |> apply_dot_effect(new_defender, defender, weapon_stats)
+        |> apply_area_effect(new_defender, reduced_damage, weapon_stats)
+        |> apply_life_drain(reduced_damage, weapon_stats)
+
+      # Return tuple even when weapon effects apply
+      {new_state, new_defender, reduced_damage}
     else
-      state
+      # Return tuple when no weapon
+      {state, new_defender, reduced_damage}
     end
   end
 
@@ -175,9 +179,9 @@ defmodule Roguelike.Combat do
     end
   end
 
-  defp update_combat_stats(state, attacker) do
+  defp update_combat_stats(state, attacker, reduced_damage) do
     if attacker == state.player,
-      do: %{state | total_damage: state.total_damage + state.total_damage},
+      do: %{state | total_damage: state.total_damage + reduced_damage},
       else: state
   end
 

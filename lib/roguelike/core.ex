@@ -2,19 +2,19 @@ defmodule Roguelike.Core do
   alias Roguelike.Combat
   alias Roguelike.Entities
   alias Roguelike.Items
-  alias Roguelike.Map
+  alias Roguelike.GameMap
 
   require Logger
 
   def init(map_data) do
     player = %Entities.Entity{
-      pos: Map.place_entity_in_room(map_data.rooms, nil),
+      pos: GameMap.place_entity_in_room(map_data.rooms, nil),
       hp: 20,
       max_hp: 20,
       symbol: "@"
     }
 
-    %{
+    initial_state = %{
       map: map_data.map,
       rooms: map_data.rooms,
       player: player,
@@ -35,64 +35,50 @@ defmodule Roguelike.Core do
       kills: 0,
       total_damage: 0
     }
+
+    # Initialize explored tiles
+    update_explored(initial_state)
   end
+
+  def update(state, {:event, %{key: ?w}}), do: move_player(state, 0, -1)
+  def update(state, {:event, %{key: ?s}}), do: move_player(state, 0, 1)
+  def update(state, {:event, %{key: ?a}}), do: move_player(state, -1, 0)
+  def update(state, {:event, %{key: ?d}}), do: move_player(state, 1, 0)
+
+  def update(%{mode: :game} = state, {:event, %{ch: ?i}}),
+    do: update_inventory_mode(state, {:event, %{ch: ?i}})
+
+  def update(%{mode: :game} = state, {:event, %{ch: ?u}}),
+    do: update_potion_menu(state, {:event, %{ch: ?u}})
+
+  def update(%{mode: :inventory} = state, msg), do: update_inventory_mode(state, msg)
+  def update(%{mode: :potion_menu} = state, msg), do: update_potion_menu(state, msg)
 
   def update(state, msg) do
-    case state.mode do
-      :game -> update_game_mode(state, msg)
-      :inventory -> update_inventory_mode(state, msg)
-      :potion_menu -> update_potion_menu(state, msg)
-      :dead -> update_dead_mode(state, msg)
-    end
+    Logger.debug("Ignoring input: #{inspect(msg)}")
+    state
   end
-
-  defp update_game_mode(state, msg) do
-    if not Entities.Entity.is_alive?(state.player) do
-      %{state | mode: :dead, user_messages: ["You Died!" | state.user_messages]}
-    else
-      handle_game_input(state, msg)
-    end
-  end
-
-  defp handle_game_input(state, {:event, %{ch: ?q}}) do
-    %{state | running: false}
-  end
-
-  defp handle_game_input(state, {:event, %{ch: ?i}}) when state.player.hp > 0 do
-    new_state = Items.inspect_inventory(state)
-    %{new_state | mode: :inventory}
-  end
-
-  defp handle_game_input(state, {:event, %{ch: ?u}}) when state.player.hp > 0 do
-    %{state | mode: :potion_menu}
-  end
-
-  defp handle_game_input(state, {:event, %{key: key}})
-       when key in [?w, ?s, ?a, ?d] and state.player.hp > 0 do
-    {dx, dy} = movement_delta(key)
-    move_player(state, dx, dy)
-  end
-
-  defp handle_game_input(state, _msg), do: update_explored_and_effects(state)
-
-  defp movement_delta(?w), do: {0, -1}
-  defp movement_delta(?s), do: {0, 1}
-  defp movement_delta(?a), do: {-1, 0}
-  defp movement_delta(?d), do: {1, 0}
 
   defp move_player(state, dx, dy) do
     old_pos = state.player.pos
     new_pos = Entities.Position.move(old_pos, dx, dy)
     Logger.debug("Attempting move from #{inspect(old_pos)} to #{inspect(new_pos)}")
 
-    if Map.is_valid_move?(new_pos, state.map) do
-      handle_valid_move(state, old_pos, new_pos)
-    else
-      Logger.debug(
-        "Move blocked at #{inspect(new_pos)}: #{Map.get(state.map[new_pos.y], new_pos.x, "#")}"
-      )
+    cond do
+      Enum.any?(state.enemies, fn e -> e.pos == new_pos and Entities.Entity.is_alive?(e) end) ->
+        enemy = Enum.find(state.enemies, &(&1.pos == new_pos))
+        Logger.debug("Attacking enemy #{enemy.symbol} at #{inspect(new_pos)}")
+        Combat.combat(state, state.player, enemy)
 
-      update_explored_and_effects(state)
+      GameMap.is_valid_move?(new_pos, state.map) ->
+        handle_valid_move(state, old_pos, new_pos)
+
+      true ->
+        Logger.debug(
+          "Move blocked at #{inspect(new_pos)}: #{Map.get(state.map[new_pos.y], new_pos.x, "#")}"
+        )
+
+        update_explored_and_effects(state)
     end
   end
 
@@ -112,29 +98,27 @@ defmodule Roguelike.Core do
     end
   end
 
-  defp process_tile(state, old_pos, new_pos) do
-    new_map = Map.put_in_map(state.map, old_pos.y, old_pos.x, ".")
-    Logger.debug("Old position cleared: #{inspect({old_pos.x, old_pos.y})} set to '.'")
+  defp process_tile(state, _old_pos, new_pos) do
     tile = state.map[new_pos.y][new_pos.x]
 
     case tile do
       "+" ->
-        new_map = Map.put_in_map(new_map, new_pos.y, new_pos.x, "/")
+        new_map = GameMap.put_in_map(state.map, new_pos.y, new_pos.x, "/")
         update_effects(%{state | map: new_map})
 
       "/" ->
         new_player = %{state.player | pos: new_pos}
-        new_state = %{state | map: new_map, player: new_player}
+        new_state = %{state | player: new_player}
         Items.pickup_item(new_state, new_pos) |> update_effects()
 
       "." ->
         new_player = %{state.player | pos: new_pos}
-        new_state = %{state | map: new_map, player: new_player}
+        new_state = %{state | player: new_player}
         Items.pickup_item(new_state, new_pos) |> update_effects()
 
       _ ->
         new_player = %{state.player | pos: new_pos}
-        new_state = %{state | map: new_map, player: new_player}
+        new_state = %{state | player: new_player}
         Items.pickup_item(new_state, new_pos) |> update_effects()
     end
   end
@@ -144,7 +128,7 @@ defmodule Roguelike.Core do
     %{state | mode: :game, user_messages: []}
   end
 
-  defp update_inventory_mode(state, _msg) do
+  defp update_inventory_mode(state, msg) do
     Logger.debug("Ignoring input in inventory mode: #{inspect(msg)}")
     state
   end
@@ -178,21 +162,21 @@ defmodule Roguelike.Core do
     end
   end
 
-  defp update_dead_mode(state, {:event, %{ch: ?q}}), do: %{state | running: false}
-  defp update_dead_mode(state, _msg), do: state
-
   defp update_explored(state) do
     explored =
       Enum.reduce(0..19, state.explored, fn y, acc ->
         Enum.reduce(0..39, acc, fn x, acc_inner ->
           pos = %Entities.Position{x: x, y: y}
 
-          if Map.is_visible?(state.player.pos, pos, state.map),
-            do: MapSet.put(acc_inner, {x, y}),
-            else: acc_inner
+          if GameMap.is_visible?(state.player.pos, pos, state.map) do
+            MapSet.put(acc_inner, {x, y})
+          else
+            acc_inner
+          end
         end)
       end)
 
+    Logger.debug("Updated ExploredTiles: #{inspect(explored)}")
     %{state | explored: explored}
   end
 
@@ -311,7 +295,7 @@ defmodule Roguelike.Core do
   end
 
   defp move_enemy(state, enemy) do
-    if Map.is_visible?(enemy.pos, state.player.pos, state.map) do
+    if GameMap.is_visible?(enemy.pos, state.player.pos, state.map) do
       move_toward_player(state, enemy)
     else
       move_randomly(state, enemy)
@@ -336,7 +320,7 @@ defmodule Roguelike.Core do
   end
 
   defp try_move_enemy(state, enemy, new_pos) do
-    if Map.is_valid_move?(new_pos, state.map) and
+    if GameMap.is_valid_move?(new_pos, state.map) and
          not Enum.any?(state.enemies, fn e ->
            e.pos == new_pos and Entities.Entity.is_alive?(e)
          end) do

@@ -1,7 +1,7 @@
 defmodule Roguelike.Items do
   alias Roguelike.Combat
   alias Roguelike.Entities
-  alias Roguelike.Map
+  alias Roguelike.GameMap
 
   @enemy_types Combat.enemy_types()
   @weapon_types Combat.weapon_types()
@@ -19,7 +19,7 @@ defmodule Roguelike.Items do
       stats = @enemy_types[enemy_type]
       {min_hp, max_hp} = stats.hp_range
       hp = Enum.random(min_hp..max_hp)
-      pos = Map.place_entity_in_room(rooms, exclude)
+      pos = GameMap.place_entity_in_room(rooms, exclude)
 
       %Entities.Entity{
         pos: pos,
@@ -49,7 +49,7 @@ defmodule Roguelike.Items do
 
   defp spawn_weapon(name, rooms, exclude, spawn_turn) do
     stats = @weapon_types[name]
-    pos = Map.place_entity_in_room(rooms, exclude)
+    pos = GameMap.place_entity_in_room(rooms, exclude)
 
     %Entities.Item{
       pos: pos,
@@ -65,7 +65,7 @@ defmodule Roguelike.Items do
   end
 
   defp spawn_potion(name, stats, rooms, exclude, spawn_turn) do
-    pos = Map.place_entity_in_room(rooms, exclude)
+    pos = GameMap.place_entity_in_room(rooms, exclude)
 
     %Entities.Item{
       pos: pos,
@@ -84,10 +84,10 @@ defmodule Roguelike.Items do
     available_types =
       Enum.filter(@enemy_types, fn {_, stats} -> stats.min_level <= player_level end)
 
-    {enemy_type, stats} = Enum.random(available_types)
+    {_enemy_type, stats} = Enum.random(available_types)
     {min_hp, max_hp} = stats.hp_range
     hp = Enum.random(min_hp..max_hp)
-    pos = Map.place_entity_in_room(rooms, player_pos)
+    pos = GameMap.place_entity_in_room(rooms, player_pos)
 
     %Entities.Entity{
       pos: pos,

@@ -1,4 +1,4 @@
-defmodule Roguelike.Map do
+defmodule Roguelike.GameMap do
   alias Roguelike.Entities
 
   @map_width 40
