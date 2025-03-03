@@ -30,7 +30,7 @@ defmodule Roguelike.Render do
         lines ++ render_potion_menu(state)
 
       :dead ->
-        lines ++ [%{content: "Game Over! Press Q to quit."}]
+        lines ++ [%{content: "#{@red}Game Over! Press Q to quit#{@reset}"}]
     end
   end
 
@@ -70,7 +70,7 @@ defmodule Roguelike.Render do
 
   defp render_enemy(state, enemy) do
     if GameMap.is_visible?(state.player.pos, enemy.pos, state.map) do
-      @yellow <> enemy.symbol <> @reset
+      @red <> enemy.symbol <> @reset
     else
       render_map(state, enemy.pos)
     end
@@ -115,17 +115,24 @@ defmodule Roguelike.Render do
 
   defp render_messages(state) do
     user_messages =
-      Enum.map(state.user_messages, fn message ->
-        %{content: message}
-      end)
+      Enum.take(state.user_messages, 5)
+      |> Enum.map(fn message -> %{content: @white <> message <> @reset} end)
 
     state_messages =
-      Enum.map(state.state_messages, fn message ->
-        %{content: message}
-      end)
+      Enum.take(state.state_messages, 5)
+      |> Enum.map(fn message -> %{content: @yellow <> message <> @reset} end)
 
-    if length(user_messages) + length(state_messages) > 0 do
-      [%{content: "----"}] ++ user_messages ++ state_messages ++ [%{content: "----"}]
+    total_length = length(user_messages) + length(state_messages)
+
+    if total_length > 0 do
+      [%{content: "----"}] ++
+        user_messages ++
+        if(length(user_messages) > 0 and length(state_messages) > 0,
+          do: [%{content: "----"}],
+          else: []
+        ) ++
+        state_messages ++
+        [%{content: "----"}]
     else
       []
     end
@@ -138,7 +145,7 @@ defmodule Roguelike.Render do
       end)
 
     Enum.map(visible_enemies, fn enemy ->
-      "#{enemy.symbol}: #{enemy.hp}/#{enemy.max_hp}"
+      "#{@red}#{enemy.symbol}#{@reset}: #{enemy.hp}/#{enemy.max_hp}"
     end)
     |> Enum.join(" | ")
   end
@@ -163,16 +170,43 @@ defmodule Roguelike.Render do
     enemy_hp = enemy_hp_string(state)
     effects = effects_string(state)
 
-    symbols =
+    visible_items =
       Enum.filter(state.items, fn item ->
         MapSet.member?(state.explored, {item.pos.x, item.pos.y}) and
           GameMap.is_visible?(state.player.pos, item.pos, state.map)
       end)
-      |> Enum.map(fn item ->
-        symbol = item.symbol
-        name = item.name
-        if String.length(symbol) == 1, do: "#{symbol}=#{name}", else: nil
+
+    visible_enemies =
+      Enum.filter(state.enemies, fn enemy ->
+        Entities.Entity.is_alive?(enemy) and
+          GameMap.is_visible?(state.player.pos, enemy.pos, state.map)
       end)
+
+    symbols =
+      (Enum.map(visible_items, fn item ->
+         symbol = item.symbol
+         name = item.name
+
+         if String.length(symbol) == 1 do
+           color =
+             case item.damage_range do
+               nil ->
+                 @green
+
+               _ ->
+                 if item.dot != nil or item.area_effect != nil or item.life_drain != nil,
+                   do: @magenta,
+                   else: @cyan
+             end
+
+           "#{color}#{symbol}#{@reset}=#{name}"
+         else
+           nil
+         end
+       end) ++
+         Enum.map(visible_enemies, fn enemy ->
+           "#{@red}#{enemy.symbol}#{@reset}=#{Items.enemy_name(enemy.symbol)}"
+         end))
       |> Enum.filter(& &1)
       |> Enum.join(" ")
 
@@ -197,16 +231,19 @@ defmodule Roguelike.Render do
 
     potion_strings =
       if inventory.potions != [] do
-        Enum.map(inventory.potions, fn potion ->
-          case potion do
+        Enum.map(inventory.potions, fn %Entities.Item{name: name} = item ->
+          case name do
             "Health Potion" ->
-              "  - Health Potion (Heals #{inspect(Items.potion_types()[potion].hp_restore)})"
+              "  - Health Potion (Heals #{inspect(item.hp_restore)})"
 
             "Damage Potion" ->
-              "  - Damage Potion (Increases damage to x#{Items.potion_types()[potion].damage_mult} for #{Items.potion_types()[potion].duration} turns)"
+              "  - Damage Potion (Increases damage to x#{item.damage_mult} for #{item.duration} turns)"
 
             "Defense Potion" ->
-              "  - Defense Potion (Reduces damage to x#{Items.potion_types()[potion].defense_mult} for #{Items.potion_types()[potion].duration} turns)"
+              "  - Defense Potion (Reduces damage to x#{item.defense_mult} for #{item.duration} turns)"
+
+            _ ->
+              "  - Unknown Potion"
           end
         end)
       else
@@ -225,16 +262,19 @@ defmodule Roguelike.Render do
     numbered_potion_list =
       state.inventory.potions
       |> Enum.with_index()
-      |> Enum.map(fn {elem, index} ->
-        case elem do
+      |> Enum.map(fn {%Entities.Item{name: name} = item, index} ->
+        case name do
           "Health Potion" ->
-            "#{index + 1}. Health Potion (Heals #{inspect(Items.potion_types()[elem].hp_restore)})"
+            "#{index + 1}. Health Potion (Heals #{inspect(item.hp_restore)})"
 
           "Damage Potion" ->
-            "#{index + 1}. Damage Potion (Increases damage to x#{Items.potion_types()[elem].damage_mult} for #{Items.potion_types()[elem].duration} turns)"
+            "#{index + 1}. Damage Potion (Increases damage to x#{item.damage_mult} for #{item.duration} turns)"
 
           "Defense Potion" ->
-            "#{index + 1}. Defense Potion (Reduces damage to x#{Items.potion_types()[elem].defense_mult} for #{Items.potion_types()[elem].duration} turns)"
+            "#{index + 1}. Defense Potion (Reduces damage to x#{item.defense_mult} for #{item.duration} turns)"
+
+          _ ->
+            "#{index + 1}. Unknown Potion"
         end
       end)
 
