@@ -11,7 +11,9 @@ defmodule Roguelike.Core do
       pos: GameMap.place_entity_in_room(map_data.rooms, nil),
       hp: 20,
       max_hp: 20,
-      symbol: "@"
+      symbol: "@",
+      # Base unarmed damage
+      damage_range: {1, 3}
     }
 
     initial_state = %{
@@ -199,7 +201,6 @@ defmodule Roguelike.Core do
       end)
 
     explored = MapSet.union(state.explored, new_visible)
-    # Logger.debug("Updated ExploredTiles: #{inspect(explored)}")
     %{state | explored: explored}
   end
 
@@ -333,21 +334,49 @@ defmodule Roguelike.Core do
     distance = Entities.Position.distance_to(enemy_pos, player_pos)
 
     cond do
-      # If rushing from last turn, charge and attack
+      # If rushing from last turn, move adjacent and attack
       enemy.rushing ->
         Logger.debug("#{enemy.symbol} rushes player from #{inspect(enemy_pos)}")
         new_enemy = %{enemy | rushing: false}
+        # Pick an adjacent tile
+        direction =
+          if abs(dx) > abs(dy),
+            do: if(dx > 0, do: %{dx: 1, dy: 0}, else: %{dx: -1, dy: 0}),
+            else: if(dy > 0, do: %{dx: 0, dy: 1}, else: %{dx: 0, dy: -1})
+
+        new_pos =
+          if dx != 0 and dy != 0,
+            do: Entities.Position.move(enemy.pos, direction.dx, direction.dy),
+            else: %Entities.Position{
+              x:
+                if(dx > 0,
+                  do: player_pos.x - 1,
+                  else: if(dx < 0, do: player_pos.x + 1, else: player_pos.x)
+                ),
+              y:
+                if(dy > 0,
+                  do: player_pos.y - 1,
+                  else: if(dy < 0, do: player_pos.y + 1, else: player_pos.y)
+                )
+            }
 
         new_state =
-          if distance <= 2 and GameMap.is_valid_move?(player_pos, state.map) do
+          if GameMap.is_valid_move?(new_pos, state.map) and
+               not Enum.any?(state.enemies, fn e ->
+                 e.pos == new_pos and Entities.Entity.is_alive?(e) and e != enemy
+               end) do
+            Logger.debug("#{enemy.symbol} moves to #{inspect(new_pos)} to attack")
+
             %{
               state
               | enemies:
                   Enum.map(state.enemies, fn e ->
-                    if e == enemy, do: %{new_enemy | pos: player_pos}, else: e
+                    if e == enemy, do: %{new_enemy | pos: new_pos}, else: e
                   end)
             }
           else
+            Logger.debug("#{enemy.symbol} rush blocked, attacking from #{inspect(enemy_pos)}")
+
             %{
               state
               | enemies:
@@ -362,9 +391,9 @@ defmodule Roguelike.Core do
         Logger.debug("#{enemy.symbol} attacks player from #{inspect(enemy_pos)}")
         Combat.combat(state, enemy, state.player)
 
-      # If within 2 tiles, tense up for next turn's rush
-      distance <= 2 ->
-        Logger.debug("#{enemy.symbol} tenses up at #{inspect(enemy_pos)}")
+      # If within 3 tiles, tense up for next turn's rush (increased from 2)
+      distance <= 3 ->
+        Logger.debug("#{enemy.symbol} tenses up at #{inspect(enemy_pos)}, distance: #{distance}")
 
         %{
           state
@@ -377,12 +406,12 @@ defmodule Roguelike.Core do
 
       # Otherwise, chase as before
       true ->
+        new_enemy = %{enemy | rushing: false}
+
         direction =
-          if abs(dx) > abs(dy) do
-            if dx > 0, do: %{dx: 1, dy: 0}, else: %{dx: -1, dy: 0}
-          else
-            if dy > 0, do: %{dx: 0, dy: 1}, else: %{dx: 0, dy: -1}
-          end
+          if abs(dx) > abs(dy),
+            do: if(dx > 0, do: %{dx: 1, dy: 0}, else: %{dx: -1, dy: 0}),
+            else: if(dy > 0, do: %{dx: 0, dy: 1}, else: %{dx: 0, dy: -1})
 
         new_pos = Entities.Position.move(enemy.pos, direction.dx, direction.dy)
 
@@ -396,7 +425,7 @@ defmodule Roguelike.Core do
             state
             | enemies:
                 Enum.map(state.enemies, fn e ->
-                  if e == enemy, do: %{e | pos: new_pos}, else: e
+                  if e == enemy, do: %{new_enemy | pos: new_pos}, else: e
                 end)
           }
         else
@@ -417,12 +446,17 @@ defmodule Roguelike.Core do
               state
               | enemies:
                   Enum.map(state.enemies, fn e ->
-                    if e == enemy, do: %{e | pos: alt_pos}, else: e
+                    if e == enemy, do: %{new_enemy | pos: alt_pos}, else: e
                   end)
             }
           else
             Logger.debug("#{enemy.symbol} blocked, staying at #{inspect(enemy.pos)}")
-            state
+
+            %{
+              state
+              | enemies:
+                  Enum.map(state.enemies, fn e -> if e == enemy, do: new_enemy, else: e end)
+            }
           end
         end
     end
