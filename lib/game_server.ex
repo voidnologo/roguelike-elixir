@@ -27,31 +27,38 @@ defmodule Roguelike.GameServer do
     {:noreply, state}
   end
 
+  def handle_info({:input, "q"}, state) do
+    case state.mode do
+      :dead ->
+        Logger.info("Quitting game after death")
+        # Stop only on "q" in :dead mode
+        {:stop, :normal, state}
+
+      _ ->
+        Logger.info("Quitting game")
+        new_state = %{state | mode: :dead}
+        render(new_state)
+        # Regular "q" sets :dead, waits for next input
+        {:noreply, new_state}
+    end
+  end
+
   def handle_info({:input, input}, state) do
     Logger.debug(
       "Received input: #{inspect(input)}, Current State Explored: #{inspect(state.explored)}"
     )
 
     new_state =
-      case input do
-        "q" ->
-          Logger.info("Quitting game")
-          %{state | mode: :dead}
-
-        _ ->
-          # Use `key` to match Core.update/2 for movement
-          Core.update(state, {:event, %{key: String.to_charlist(input) |> hd}})
+      if state.mode == :dead do
+        # Ignore inputs except "q" in :dead mode
+        state
+      else
+        Core.update(state, {:event, %{key: String.to_charlist(input) |> hd}})
       end
 
     Logger.debug("New State Explored: #{inspect(new_state.explored)}")
     render(new_state)
-
-    if new_state.mode == :dead do
-      Logger.info("Game over, stopping server")
-      {:stop, :normal, new_state}
-    else
-      {:noreply, new_state}
-    end
+    {:noreply, new_state}
   end
 
   def handle_info(msg, state) do
@@ -66,17 +73,13 @@ defmodule Roguelike.GameServer do
     Logger.debug("Server PID (game_server::input_loop()): #{inspect(server_pid)}")
     send(server_pid, {:input, input})
 
-    if input != "q" do
-      input_loop(server_pid)
-    else
-      Logger.debug("Input loop ending due to quit")
-    end
+    # Continue looping even after "q" until server stops
+    input_loop(server_pid)
   end
 
   defp render(state) do
     IO.write("\e[2J\e[H")
     lines = Render.render_game(state)
-    # Logger.debug("Render called with lines: #{inspect(Enum.map(lines, & &1.content))}")
 
     Enum.each(lines, fn line ->
       IO.puts(line.content)

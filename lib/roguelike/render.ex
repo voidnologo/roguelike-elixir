@@ -13,7 +13,6 @@ defmodule Roguelike.Render do
   @green IO.ANSI.green()
   @yellow IO.ANSI.yellow()
   @red IO.ANSI.red()
-  # Added for player symbol
   @blue IO.ANSI.blue()
   @reset IO.ANSI.reset()
 
@@ -32,7 +31,8 @@ defmodule Roguelike.Render do
         lines ++ render_potion_menu(state)
 
       :dead ->
-        lines ++ [%{content: "#{@red}Game Over! Press Q to quit#{@reset}"}]
+        # Updated to show stats on death
+        lines ++ render_stats(state)
     end
   end
 
@@ -66,7 +66,6 @@ defmodule Roguelike.Render do
   defp render_player(state) do
     case state.mode do
       :dead -> @red <> "@" <> @reset
-      # Changed to bright blue
       _ -> @bright <> @blue <> "@" <> @reset
     end
   end
@@ -172,6 +171,8 @@ defmodule Roguelike.Render do
   defp render_status(state) do
     enemy_hp = enemy_hp_string(state)
     effects = effects_string(state)
+    # Simple XP progression: 100 per level
+    xp_for_next_level = state.player_level * 100
 
     visible_items =
       Enum.filter(state.items, fn item ->
@@ -216,7 +217,7 @@ defmodule Roguelike.Render do
     [
       %{
         content:
-          "#{@white}Player: Level #{state.player_level} (XP: #{state.player_xp}) HP: #{@green}#{state.player.hp}/#{state.player.max_hp}#{@reset}  Enemies: #{enemy_hp}"
+          "#{@white}Player: Level #{state.player_level} (XP: #{state.player_xp}/#{xp_for_next_level}) HP: #{@green}#{state.player.hp}/#{state.player.max_hp}#{@reset}  Enemies: #{enemy_hp}"
       },
       %{content: "Potions: #{length(state.inventory.potions)}  Effects: #{effects}"},
       %{
@@ -288,5 +289,18 @@ defmodule Roguelike.Render do
     ] ++
       Enum.map(numbered_potion_list, fn potion -> %{content: potion} end) ++
       render_status(state)
+  end
+
+  defp render_stats(state) do
+    [
+      %{content: "#{@red}Game Over!#{@reset}"},
+      %{content: "Final Stats:"},
+      %{content: "Level Reached: #{state.player_level}"},
+      %{content: "XP Gained: #{state.player_xp}"},
+      %{content: "Enemies Slain: #{state.kills}"},
+      %{content: "Total Damage Dealt: #{state.total_damage}"},
+      %{content: "Turns Played: #{state.turn_count}"},
+      %{content: "Press Q to quit"}
+    ]
   end
 end
