@@ -2,20 +2,11 @@
 
 **TODO: Add description**
 
-## Installation
+#To Run
+- `mix compile`
+- `mix run --no-halt`
 
-If [available in Hex](https://hex.pm/docs/publish), the package can be installed
-by adding `roguelike` to your list of dependencies in `mix.exs`:
-
-```elixir
-def deps do
-  [
-    {:roguelike, "~> 0.1.0"}
-  ]
-end
-```
-
-Documentation can be generated with [ExDoc](https://github.com/elixir-lang/ex_doc)
-and published on [HexDocs](https://hexdocs.pm). Once published, the docs can
-be found at <https://hexdocs.pm/roguelike>.
+## Env
+- Elixir 1.18
+- OTP 27
 
