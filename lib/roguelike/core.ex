@@ -199,7 +199,7 @@ defmodule Roguelike.Core do
       end)
 
     explored = MapSet.union(state.explored, new_visible)
-    Logger.debug("Updated ExploredTiles: #{inspect(explored)}")
+    # Logger.debug("Updated ExploredTiles: #{inspect(explored)}")
     %{state | explored: explored}
   end
 
@@ -330,60 +330,101 @@ defmodule Roguelike.Core do
     enemy_pos = enemy.pos
     dx = player_pos.x - enemy_pos.x
     dy = player_pos.y - enemy_pos.y
+    distance = Entities.Position.distance_to(enemy_pos, player_pos)
 
-    # Check if adjacent (within 1 tile) and attack if so
-    if abs(dx) <= 1 and abs(dy) <= 1 do
-      Logger.debug("#{enemy.symbol} attacks player from #{inspect(enemy_pos)}")
-      Combat.combat(state, enemy, state.player)
-    else
-      # Prioritize larger distance axis for smarter chasing
-      direction =
-        if abs(dx) > abs(dy) do
-          if dx > 0, do: %{dx: 1, dy: 0}, else: %{dx: -1, dy: 0}
-        else
-          if dy > 0, do: %{dx: 0, dy: 1}, else: %{dx: 0, dy: -1}
-        end
+    cond do
+      # If rushing from last turn, charge and attack
+      enemy.rushing ->
+        Logger.debug("#{enemy.symbol} rushes player from #{inspect(enemy_pos)}")
+        new_enemy = %{enemy | rushing: false}
 
-      new_pos = Entities.Position.move(enemy.pos, direction.dx, direction.dy)
+        new_state =
+          if distance <= 2 and GameMap.is_valid_move?(player_pos, state.map) do
+            %{
+              state
+              | enemies:
+                  Enum.map(state.enemies, fn e ->
+                    if e == enemy, do: %{new_enemy | pos: player_pos}, else: e
+                  end)
+            }
+          else
+            %{
+              state
+              | enemies:
+                  Enum.map(state.enemies, fn e -> if e == enemy, do: new_enemy, else: e end)
+            }
+          end
 
-      if GameMap.is_valid_move?(new_pos, state.map) and
-           not Enum.any?(state.enemies, fn e ->
-             e.pos == new_pos and Entities.Entity.is_alive?(e) and e != enemy
-           end) do
-        Logger.debug("#{enemy.symbol} moves toward player to #{inspect(new_pos)}")
+        Combat.combat(new_state, new_enemy, state.player)
+
+      # If adjacent, attack immediately
+      distance <= 1 ->
+        Logger.debug("#{enemy.symbol} attacks player from #{inspect(enemy_pos)}")
+        Combat.combat(state, enemy, state.player)
+
+      # If within 2 tiles, tense up for next turn's rush
+      distance <= 2 ->
+        Logger.debug("#{enemy.symbol} tenses up at #{inspect(enemy_pos)}")
 
         %{
           state
           | enemies:
-              Enum.map(state.enemies, fn e -> if e == enemy, do: %{e | pos: new_pos}, else: e end)
+              Enum.map(state.enemies, fn e -> if e == enemy, do: %{e | rushing: true}, else: e end),
+            user_messages: [
+              "#{enemy.symbol} tenses up, preparing to strike!" | state.user_messages
+            ]
         }
-      else
-        # Try alternate direction if primary is blocked
-        alt_direction =
-          if direction.dx != 0,
-            do: if(dy > 0, do: %{dx: 0, dy: 1}, else: %{dx: 0, dy: -1}),
-            else: if(dx > 0, do: %{dx: 1, dy: 0}, else: %{dx: -1, dy: 0})
 
-        alt_pos = Entities.Position.move(enemy.pos, alt_direction.dx, alt_direction.dy)
+      # Otherwise, chase as before
+      true ->
+        direction =
+          if abs(dx) > abs(dy) do
+            if dx > 0, do: %{dx: 1, dy: 0}, else: %{dx: -1, dy: 0}
+          else
+            if dy > 0, do: %{dx: 0, dy: 1}, else: %{dx: 0, dy: -1}
+          end
 
-        if GameMap.is_valid_move?(alt_pos, state.map) and
+        new_pos = Entities.Position.move(enemy.pos, direction.dx, direction.dy)
+
+        if GameMap.is_valid_move?(new_pos, state.map) and
              not Enum.any?(state.enemies, fn e ->
-               e.pos == alt_pos and Entities.Entity.is_alive?(e) and e != enemy
+               e.pos == new_pos and Entities.Entity.is_alive?(e) and e != enemy
              end) do
-          Logger.debug("#{enemy.symbol} takes alternate path to #{inspect(alt_pos)}")
+          Logger.debug("#{enemy.symbol} moves toward player to #{inspect(new_pos)}")
 
           %{
             state
             | enemies:
                 Enum.map(state.enemies, fn e ->
-                  if e == enemy, do: %{e | pos: alt_pos}, else: e
+                  if e == enemy, do: %{e | pos: new_pos}, else: e
                 end)
           }
         else
-          Logger.debug("#{enemy.symbol} blocked, staying at #{inspect(enemy.pos)}")
-          state
+          alt_direction =
+            if direction.dx != 0,
+              do: if(dy > 0, do: %{dx: 0, dy: 1}, else: %{dx: 0, dy: -1}),
+              else: if(dx > 0, do: %{dx: 1, dy: 0}, else: %{dx: -1, dy: 0})
+
+          alt_pos = Entities.Position.move(enemy.pos, alt_direction.dx, alt_direction.dy)
+
+          if GameMap.is_valid_move?(alt_pos, state.map) and
+               not Enum.any?(state.enemies, fn e ->
+                 e.pos == alt_pos and Entities.Entity.is_alive?(e) and e != enemy
+               end) do
+            Logger.debug("#{enemy.symbol} takes alternate path to #{inspect(alt_pos)}")
+
+            %{
+              state
+              | enemies:
+                  Enum.map(state.enemies, fn e ->
+                    if e == enemy, do: %{e | pos: alt_pos}, else: e
+                  end)
+            }
+          else
+            Logger.debug("#{enemy.symbol} blocked, staying at #{inspect(enemy.pos)}")
+            state
+          end
         end
-      end
     end
   end
 
