@@ -21,6 +21,12 @@ defmodule Roguelike.GameServer do
     {:ok, state}
   end
 
+  def handle_info({:input, ""}, state) do
+    Logger.debug("Received empty input, ignoring")
+    render(state)
+    {:noreply, state}
+  end
+
   def handle_info({:input, input}, state) do
     Logger.debug(
       "Received input: #{inspect(input)}, Current State Explored: #{inspect(state.explored)}"
@@ -50,6 +56,7 @@ defmodule Roguelike.GameServer do
 
   def handle_info(msg, state) do
     Logger.warning("Unexpected message: #{inspect(msg)}")
+    render(state)
     {:noreply, state}
   end
 
@@ -69,7 +76,7 @@ defmodule Roguelike.GameServer do
   defp render(state) do
     IO.write("\e[2J\e[H")
     lines = Render.render_game(state)
-    Logger.debug("Render called with lines: #{inspect(Enum.map(lines, & &1.content))}")
+    # Logger.debug("Render called with lines: #{inspect(Enum.map(lines, & &1.content))}")
 
     Enum.each(lines, fn line ->
       IO.puts(line.content)

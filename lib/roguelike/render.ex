@@ -1,5 +1,6 @@
 defmodule Roguelike.Render do
   alias Roguelike.Combat
+  alias Roguelike.Items
   alias Roguelike.Entities
   alias Roguelike.GameMap
 
@@ -14,15 +15,16 @@ defmodule Roguelike.Render do
   @gray "\e[90m"
   @enemy_symbols Enum.map(Combat.enemy_types(), fn {_, stats} -> stats.symbol end)
   @weapon_symbols Enum.map(Combat.weapon_types(), fn {_, stats} -> stats.symbol end)
+  @potion_symbols Enum.map(Items.potion_types(), fn {_, stats} -> stats.symbol end)
 
   def render_game(state) do
     render_map = render_items(state) |> render_enemies(state) |> render_player(state)
     map_lines = build_map_lines(state, render_map)
-    Logger.debug("ExploredTiles: #{inspect(state.explored)}")
+    # Logger.debug("ExploredTiles: #{inspect(state.explored)}")
 
-    Logger.debug(
-      "BaseMapSample: #{inspect(for y <- 8..15, x <- 7..29, do: {{x, y}, state.map[y][x]})}"
-    )
+    # Logger.debug(
+    #   "BaseMapSample: #{inspect(for y <- 8..15, x <- 7..29, do: {{x, y}, state.map[y][x]})}"
+    # )
 
     case state.mode do
       :game -> render_game_mode(state, map_lines)
@@ -69,7 +71,7 @@ defmodule Roguelike.Render do
           render_tile(pos, base_tile, render_tile, state)
         end
 
-      Logger.debug("Row #{y}: #{inspect(row)}")
+      # Logger.debug("Row #{y}: #{inspect(row)}")
       %{content: String.pad_trailing(row, 40)}
     end
   end
@@ -102,7 +104,7 @@ defmodule Roguelike.Render do
            do: "#{@magenta}#{tile}#{@reset}",
            else: "#{@cyan}#{tile}#{@reset}"
 
-      tile in ["h", "D", "F"] ->
+      tile in @potion_symbols ->
         "#{@green}#{tile}#{@reset}"
 
       tile == "#" ->
@@ -117,7 +119,7 @@ defmodule Roguelike.Render do
     cond do
       tile in @enemy_symbols -> "#{@gray}#{tile}#{@reset}"
       tile in @weapon_symbols -> "#{@gray}#{tile}#{@reset}"
-      tile in ["h", "D", "F"] -> "#{@gray}#{tile}#{@reset}"
+      tile in @potion_symbols -> "#{@gray}#{tile}#{@reset}"
       tile == "#" -> "#{@gray}##{@reset}"
       tile == "." -> "."
       tile == "+" -> "+"
@@ -200,12 +202,9 @@ defmodule Roguelike.Render do
 
             "#{color}#{symbol}#{@reset}=#{name}"
 
-          symbol in ["h", "D", "F"] ->
+          symbol in @potion_symbols ->
             name =
-              Enum.find_value(
-                %{"h" => "Health Potion", "D" => "Damage Potion", "F" => "Defense Potion"},
-                fn {k, v} -> if k == symbol, do: v end
-              )
+              Enum.find_value(Items.potion_types(), fn {k, v} -> if v.symbol == symbol, do: k end)
 
             "#{@green}#{symbol}#{@reset}=#{name}"
 

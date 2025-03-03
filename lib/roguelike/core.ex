@@ -36,14 +36,24 @@ defmodule Roguelike.Core do
       total_damage: 0
     }
 
-    # Initialize explored tiles
     update_explored(initial_state)
   end
 
-  def update(state, {:event, %{key: ?w}}), do: move_player(state, 0, -1)
-  def update(state, {:event, %{key: ?s}}), do: move_player(state, 0, 1)
-  def update(state, {:event, %{key: ?a}}), do: move_player(state, -1, 0)
-  def update(state, {:event, %{key: ?d}}), do: move_player(state, 1, 0)
+  def update(state, {:event, %{key: ?w}}) do
+    move_player(state, 0, -1)
+  end
+
+  def update(state, {:event, %{key: ?s}}) do
+    move_player(state, 0, 1)
+  end
+
+  def update(state, {:event, %{key: ?a}}) do
+    move_player(state, -1, 0)
+  end
+
+  def update(state, {:event, %{key: ?d}}) do
+    move_player(state, 1, 0)
+  end
 
   def update(%{mode: :game} = state, {:event, %{ch: ?i}}),
     do: update_inventory_mode(state, {:event, %{ch: ?i}})
@@ -68,10 +78,13 @@ defmodule Roguelike.Core do
       Enum.any?(state.enemies, fn e -> e.pos == new_pos and Entities.Entity.is_alive?(e) end) ->
         enemy = Enum.find(state.enemies, &(&1.pos == new_pos))
         Logger.debug("Attacking enemy #{enemy.symbol} at #{inspect(new_pos)}")
-        Combat.combat(state, state.player, enemy)
+        new_state = Combat.combat(state, state.player, enemy)
+        Logger.debug("Combat returned: #{inspect(new_state.user_messages)}")
+        update_explored(new_state)
 
       GameMap.is_valid_move?(new_pos, state.map) ->
         handle_valid_move(state, old_pos, new_pos)
+        |> update_explored()
 
       true ->
         Logger.debug(
@@ -86,13 +99,10 @@ defmodule Roguelike.Core do
     enemy_at_new_pos =
       Enum.find(state.enemies, fn e -> e.pos == new_pos and Entities.Entity.is_alive?(e) end)
 
-    new_state = update_explored(state)
-
     if enemy_at_new_pos do
       Logger.debug("Attacking enemy #{enemy_at_new_pos.symbol} at #{inspect(new_pos)}")
-
-      Combat.combat(new_state, new_state.player, enemy_at_new_pos)
-      |> update_effects()
+      new_state = Combat.combat(state, state.player, enemy_at_new_pos)
+      update_effects(new_state)
     else
       process_tile(state, old_pos, new_pos)
     end
@@ -163,8 +173,8 @@ defmodule Roguelike.Core do
   end
 
   defp update_explored(state) do
-    explored =
-      Enum.reduce(0..19, state.explored, fn y, acc ->
+    new_visible =
+      Enum.reduce(0..19, MapSet.new(), fn y, acc ->
         Enum.reduce(0..39, acc, fn x, acc_inner ->
           pos = %Entities.Position{x: x, y: y}
 
@@ -176,6 +186,7 @@ defmodule Roguelike.Core do
         end)
       end)
 
+    explored = MapSet.union(state.explored, new_visible)
     Logger.debug("Updated ExploredTiles: #{inspect(explored)}")
     %{state | explored: explored}
   end
@@ -307,7 +318,8 @@ defmodule Roguelike.Core do
     new_pos = Entities.Position.move(enemy.pos, direction.dx, direction.dy)
 
     if new_pos == state.player.pos do
-      Combat.combat(state, enemy, state.player)
+      new_state = Combat.combat(state, enemy, state.player)
+      new_state
     else
       try_move_enemy(state, enemy, new_pos)
     end

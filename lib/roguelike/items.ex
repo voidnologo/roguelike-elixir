@@ -7,9 +7,12 @@ defmodule Roguelike.Items do
   @weapon_types Combat.weapon_types()
   @potion_types %{
     "Health Potion" => %{hp_restore: {5, 10}, symbol: "h"},
-    "Damage Potion" => %{damage_mult: 1.5, symbol: "D", duration: 10},
-    "Defense Potion" => %{defense_mult: 0.5, symbol: "F", duration: 10}
+    "Damage Potion" => %{damage_mult: 1.5, symbol: "p", duration: 10},
+    "Defense Potion" => %{defense_mult: 0.5, symbol: "d", duration: 10}
   }
+
+  # Add accessor for render.ex
+  def potion_types, do: @potion_types
 
   def spawn_initial_enemies(rooms, player_pos) do
     exclude = player_pos

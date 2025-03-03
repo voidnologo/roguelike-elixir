@@ -22,7 +22,7 @@ defmodule Roguelike.Combat do
   }
 
   @weapon_types %{
-    "Dagger" => %{damage_range: {1, 3}, symbol: "d"},
+    "Dagger" => %{damage_range: {1, 3}, symbol: "r"},
     "Sword" => %{damage_range: {2, 5}, symbol: "s"},
     "Axe" => %{damage_range: {3, 7}, symbol: "a"},
     "Mace" => %{damage_range: {2, 6}, symbol: "m"},
@@ -47,8 +47,8 @@ defmodule Roguelike.Combat do
     |> calculate_damage(attacker, defender)
     |> apply_damage(attacker, defender)
     |> apply_weapon_effects(attacker, defender)
-    |> (fn {state, _, reduced_damage} -> update_combat_stats(state, attacker, reduced_damage) end).()
-    |> handle_combat_outcome(attacker, defender)
+    |> update_combat_stats(attacker)
+    |> handle_combat_outcome(attacker)
   end
 
   defp calculate_damage(state, attacker, _defender) do
@@ -95,10 +95,8 @@ defmodule Roguelike.Combat do
         |> apply_area_effect(new_defender, reduced_damage, weapon_stats)
         |> apply_life_drain(reduced_damage, weapon_stats)
 
-      # Return tuple even when weapon effects apply
       {new_state, new_defender, reduced_damage}
     else
-      # Return tuple when no weapon
       {state, new_defender, reduced_damage}
     end
   end
@@ -179,18 +177,21 @@ defmodule Roguelike.Combat do
     end
   end
 
-  defp update_combat_stats(state, attacker, reduced_damage) do
-    if attacker == state.player,
-      do: %{state | total_damage: state.total_damage + reduced_damage},
-      else: state
+  defp update_combat_stats({state, new_defender, reduced_damage}, attacker) do
+    new_state =
+      if attacker == state.player,
+        do: %{state | total_damage: state.total_damage + reduced_damage},
+        else: state
+
+    {new_state, new_defender, reduced_damage}
   end
 
-  defp handle_combat_outcome(state, attacker, defender) do
-    if not Entities.Entity.is_alive?(defender) do
-      if defender == state.player do
+  defp handle_combat_outcome({state, new_defender, _reduced_damage}, attacker) do
+    if not Entities.Entity.is_alive?(new_defender) do
+      if new_defender == state.player do
         %{state | mode: :dead, user_messages: ["You Died!" | state.user_messages]}
       else
-        handle_enemy_death(state, attacker, defender)
+        handle_enemy_death(state, attacker, new_defender)
       end
     else
       state
@@ -198,6 +199,8 @@ defmodule Roguelike.Combat do
   end
 
   defp handle_enemy_death(state, attacker, defender) do
+    # Your added debug
+    Logger.debug("Enemy died!")
     new_xp = state.player_xp + defender.xp_value
     new_kills = state.kills + 1
 
