@@ -13,6 +13,8 @@ defmodule Roguelike.Render do
   @green IO.ANSI.green()
   @yellow IO.ANSI.yellow()
   @red IO.ANSI.red()
+  # Added for player symbol
+  @blue IO.ANSI.blue()
   @reset IO.ANSI.reset()
 
   def render_game(state) do
@@ -64,7 +66,8 @@ defmodule Roguelike.Render do
   defp render_player(state) do
     case state.mode do
       :dead -> @red <> "@" <> @reset
-      _ -> @white <> @bright <> "@" <> @reset
+      # Changed to bright blue
+      _ -> @bright <> @blue <> "@" <> @reset
     end
   end
 
@@ -213,7 +216,7 @@ defmodule Roguelike.Render do
     [
       %{
         content:
-          "Player: Level #{state.player_level} (XP: #{state.player_xp}) HP: #{state.player.hp}/#{state.player.max_hp}  Enemies: #{enemy_hp}"
+          "#{@white}Player: Level #{state.player_level} (XP: #{state.player_xp}) HP: #{@green}#{state.player.hp}/#{state.player.max_hp}#{@reset}  Enemies: #{enemy_hp}"
       },
       %{content: "Potions: #{length(state.inventory.potions)}  Effects: #{effects}"},
       %{
