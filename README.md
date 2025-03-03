@@ -13,7 +13,8 @@
 - player will level up every (100 * level), gaining more health and hitting harder
 - harder enemies will appear at higher levels.
 
-- I could not get a terminal package working, so you have to press `Enter` between each turn.  
+- I could not get a terminal package working, so you have to press `Enter` between each turn.
+- There is a _lot_ of logging.  Recommend you turn logging settings off.
 
 # To Run
 - `mix compile`
