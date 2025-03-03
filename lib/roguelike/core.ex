@@ -1,8 +1,8 @@
 defmodule Roguelike.Core do
   alias Roguelike.Combat
   alias Roguelike.Entities
-  alias Roguelike.Items
   alias Roguelike.GameMap
+  alias Roguelike.Items
 
   require Logger
 
@@ -55,13 +55,34 @@ defmodule Roguelike.Core do
     move_player(state, 1, 0)
   end
 
-  def update(%{mode: :game} = state, {:event, %{ch: ?i}}),
-    do: update_inventory_mode(state, {:event, %{ch: ?i}})
+  def update(%{mode: :game} = state, {:event, %{key: ?i}}) do
+    Items.inspect_inventory(state)
+    |> Map.put(:mode, :inventory)
+  end
 
-  def update(%{mode: :game} = state, {:event, %{ch: ?u}}),
-    do: update_potion_menu(state, {:event, %{ch: ?u}})
+  def update(%{mode: :game} = state, {:event, %{key: ?u}}) do
+    if state.inventory.potions == [] do
+      %{state | user_messages: ["No potions available" | state.user_messages]}
+    else
+      %{state | mode: :potion_menu}
+    end
+  end
+
+  def update(%{mode: :inventory} = state, {:event, %{key: ?i}}) do
+    update_inventory_mode(state, {:event, %{key: ?i}})
+  end
 
   def update(%{mode: :inventory} = state, msg), do: update_inventory_mode(state, msg)
+
+  def update(%{mode: :potion_menu} = state, {:event, %{key: ch}}) when ch in ?1..?9 do
+    apply_potion(state, ch)
+  end
+
+  def update(%{mode: :potion_menu} = state, {:event, %{key: ch}}) when ch in [?u, ?q] do
+    Logger.debug("Potion menu cancelled")
+    %{state | user_messages: ["Cancelled." | state.user_messages], mode: :game}
+  end
+
   def update(%{mode: :potion_menu} = state, msg), do: update_potion_menu(state, msg)
 
   def update(state, msg) do
@@ -133,7 +154,7 @@ defmodule Roguelike.Core do
     end
   end
 
-  defp update_inventory_mode(state, {:event, %{ch: ?i}}) do
+  defp update_inventory_mode(state, {:event, %{key: ?i}}) do
     Logger.debug("Exiting inventory mode")
     %{state | mode: :game, user_messages: []}
   end
@@ -141,15 +162,6 @@ defmodule Roguelike.Core do
   defp update_inventory_mode(state, msg) do
     Logger.debug("Ignoring input in inventory mode: #{inspect(msg)}")
     state
-  end
-
-  defp update_potion_menu(state, {:event, %{ch: ch}}) when ch in ?1..?9 do
-    apply_potion(state, ch)
-  end
-
-  defp update_potion_menu(state, {:event, %{ch: ch}}) when ch in [?u, ?q] do
-    Logger.debug("Potion menu cancelled")
-    %{state | user_messages: ["Cancelled." | state.user_messages], mode: :game}
   end
 
   defp update_potion_menu(state, msg) do

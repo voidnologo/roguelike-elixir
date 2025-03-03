@@ -39,7 +39,7 @@ defmodule Roguelike.GameServer do
           %{state | mode: :dead}
 
         _ ->
-          # Use `key` to match Core.update/2
+          # Use `key` to match Core.update/2 for movement
           Core.update(state, {:event, %{key: String.to_charlist(input) |> hd}})
       end
 
