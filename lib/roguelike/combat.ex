@@ -4,21 +4,27 @@ defmodule Roguelike.Combat do
   require Logger
 
   @enemy_types %{
-    "Goblin" => %{hp_range: {5, 10}, damage_range: {1, 2}, symbol: "G", min_level: 1, xp: 20},
-    "Orc" => %{hp_range: {10, 15}, damage_range: {2, 4}, symbol: "O", min_level: 1, xp: 30},
-    "Troll" => %{hp_range: {15, 20}, damage_range: {3, 6}, symbol: "T", min_level: 1, xp: 50},
-    "Wraith" => %{hp_range: {20, 25}, damage_range: {4, 7}, symbol: "W", min_level: 3, xp: 70},
-    "Dragon" => %{hp_range: {30, 40}, damage_range: {6, 10}, symbol: "D", min_level: 5, xp: 100},
-    "Skeleton" => %{hp_range: {5, 8}, damage_range: {1, 3}, symbol: "S", min_level: 1, xp: 15},
-    "Kobold" => %{hp_range: {8, 12}, damage_range: {2, 3}, symbol: "K", min_level: 1, xp: 25},
-    "Giant Rat" => %{hp_range: {6, 10}, damage_range: {1, 4}, symbol: "R", min_level: 1, xp: 20},
-    "Harpy" => %{hp_range: {12, 18}, damage_range: {3, 5}, symbol: "H", min_level: 2, xp: 40},
-    "Minotaur" => %{hp_range: {18, 25}, damage_range: {4, 6}, symbol: "M", min_level: 3, xp: 60},
-    "Basilisk" => %{hp_range: {20, 30}, damage_range: {5, 8}, symbol: "B", min_level: 4, xp: 80},
-    "Chimera" => %{hp_range: {25, 35}, damage_range: {5, 9}, symbol: "C", min_level: 5, xp: 90},
-    "Vampire" => %{hp_range: {30, 40}, damage_range: {6, 10}, symbol: "V", min_level: 6, xp: 120},
-    "Lich" => %{hp_range: {35, 45}, damage_range: {7, 11}, symbol: "L", min_level: 7, xp: 150},
-    "Beholder" => %{hp_range: {40, 60}, damage_range: {8, 12}, symbol: "E", min_level: 8, xp: 200}
+    "Goblin" => %{hp_range: {10, 15}, damage_range: {2, 4}, symbol: "G", min_level: 1, xp: 25},
+    "Orc" => %{hp_range: {15, 25}, damage_range: {3, 6}, symbol: "O", min_level: 1, xp: 40},
+    "Troll" => %{hp_range: {25, 35}, damage_range: {5, 8}, symbol: "T", min_level: 1, xp: 60},
+    "Wraith" => %{hp_range: {30, 40}, damage_range: {6, 9}, symbol: "W", min_level: 3, xp: 80},
+    "Dragon" => %{hp_range: {50, 70}, damage_range: {8, 12}, symbol: "D", min_level: 5, xp: 120},
+    "Skeleton" => %{hp_range: {10, 15}, damage_range: {2, 5}, symbol: "S", min_level: 1, xp: 20},
+    "Kobold" => %{hp_range: {12, 18}, damage_range: {2, 4}, symbol: "K", min_level: 1, xp: 30},
+    "Giant Rat" => %{hp_range: {8, 14}, damage_range: {2, 5}, symbol: "R", min_level: 1, xp: 25},
+    "Harpy" => %{hp_range: {18, 25}, damage_range: {4, 7}, symbol: "H", min_level: 2, xp: 50},
+    "Minotaur" => %{hp_range: {30, 40}, damage_range: {6, 9}, symbol: "M", min_level: 3, xp: 70},
+    "Basilisk" => %{hp_range: {35, 45}, damage_range: {7, 10}, symbol: "B", min_level: 4, xp: 90},
+    "Chimera" => %{hp_range: {40, 50}, damage_range: {7, 11}, symbol: "C", min_level: 5, xp: 100},
+    "Vampire" => %{hp_range: {45, 60}, damage_range: {8, 12}, symbol: "V", min_level: 6, xp: 140},
+    "Lich" => %{hp_range: {50, 65}, damage_range: {9, 13}, symbol: "L", min_level: 7, xp: 170},
+    "Beholder" => %{
+      hp_range: {60, 80},
+      damage_range: {10, 15},
+      symbol: "E",
+      min_level: 8,
+      xp: 220
+    }
   }
 
   @weapon_types %{
@@ -26,7 +32,7 @@ defmodule Roguelike.Combat do
     "Sword" => %{damage_range: {2, 5}, symbol: "s"},
     "Axe" => %{damage_range: {3, 7}, symbol: "a"},
     "Mace" => %{damage_range: {2, 6}, symbol: "m"},
-    "Spear" => %{damage_range: {3, 5}, symbol: "p"},
+    "Spear" => %{damage_range: {3, 5}, symbol: "l"},
     "Bow" => %{damage_range: {2, 7}, symbol: "b"},
     "Flaming Sword" => %{
       damage_range: {3, 6},
@@ -199,7 +205,6 @@ defmodule Roguelike.Combat do
   end
 
   defp handle_enemy_death(state, attacker, defender) do
-    # Your added debug
     Logger.debug("Enemy died!")
     new_xp = state.player_xp + defender.xp_value
     new_kills = state.kills + 1

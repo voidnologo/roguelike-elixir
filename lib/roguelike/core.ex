@@ -326,28 +326,77 @@ defmodule Roguelike.Core do
   end
 
   defp move_toward_player(state, enemy) do
-    direction = get_direction_toward(enemy.pos, state.player.pos)
-    new_pos = Entities.Position.move(enemy.pos, direction.dx, direction.dy)
+    player_pos = state.player.pos
+    enemy_pos = enemy.pos
+    dx = player_pos.x - enemy_pos.x
+    dy = player_pos.y - enemy_pos.y
 
-    if new_pos == state.player.pos do
-      new_state = Combat.combat(state, enemy, state.player)
-      new_state
+    # Check if adjacent (within 1 tile) and attack if so
+    if abs(dx) <= 1 and abs(dy) <= 1 do
+      Logger.debug("#{enemy.symbol} attacks player from #{inspect(enemy_pos)}")
+      Combat.combat(state, enemy, state.player)
     else
-      try_move_enemy(state, enemy, new_pos)
+      # Prioritize larger distance axis for smarter chasing
+      direction =
+        if abs(dx) > abs(dy) do
+          if dx > 0, do: %{dx: 1, dy: 0}, else: %{dx: -1, dy: 0}
+        else
+          if dy > 0, do: %{dx: 0, dy: 1}, else: %{dx: 0, dy: -1}
+        end
+
+      new_pos = Entities.Position.move(enemy.pos, direction.dx, direction.dy)
+
+      if GameMap.is_valid_move?(new_pos, state.map) and
+           not Enum.any?(state.enemies, fn e ->
+             e.pos == new_pos and Entities.Entity.is_alive?(e) and e != enemy
+           end) do
+        Logger.debug("#{enemy.symbol} moves toward player to #{inspect(new_pos)}")
+
+        %{
+          state
+          | enemies:
+              Enum.map(state.enemies, fn e -> if e == enemy, do: %{e | pos: new_pos}, else: e end)
+        }
+      else
+        # Try alternate direction if primary is blocked
+        alt_direction =
+          if direction.dx != 0,
+            do: if(dy > 0, do: %{dx: 0, dy: 1}, else: %{dx: 0, dy: -1}),
+            else: if(dx > 0, do: %{dx: 1, dy: 0}, else: %{dx: -1, dy: 0})
+
+        alt_pos = Entities.Position.move(enemy.pos, alt_direction.dx, alt_direction.dy)
+
+        if GameMap.is_valid_move?(alt_pos, state.map) and
+             not Enum.any?(state.enemies, fn e ->
+               e.pos == alt_pos and Entities.Entity.is_alive?(e) and e != enemy
+             end) do
+          Logger.debug("#{enemy.symbol} takes alternate path to #{inspect(alt_pos)}")
+
+          %{
+            state
+            | enemies:
+                Enum.map(state.enemies, fn e ->
+                  if e == enemy, do: %{e | pos: alt_pos}, else: e
+                end)
+          }
+        else
+          Logger.debug("#{enemy.symbol} blocked, staying at #{inspect(enemy.pos)}")
+          state
+        end
+      end
     end
   end
 
   defp move_randomly(state, enemy) do
     direction = Enum.random([{0, 1}, {0, -1}, {1, 0}, {-1, 0}])
     new_pos = Entities.Position.move(enemy.pos, elem(direction, 0), elem(direction, 1))
-    try_move_enemy(state, enemy, new_pos)
-  end
 
-  defp try_move_enemy(state, enemy, new_pos) do
     if GameMap.is_valid_move?(new_pos, state.map) and
          not Enum.any?(state.enemies, fn e ->
-           e.pos == new_pos and Entities.Entity.is_alive?(e)
+           e.pos == new_pos and Entities.Entity.is_alive?(e) and e != enemy
          end) do
+      Logger.debug("#{enemy.symbol} moves randomly to #{inspect(new_pos)}")
+
       %{
         state
         | enemies:
@@ -371,17 +420,5 @@ defmodule Roguelike.Core do
     else
       state
     end
-  end
-
-  defp get_direction_toward(enemy_pos, player_pos) do
-    dx =
-      if player_pos.x > enemy_pos.x, do: 1, else: if(player_pos.x < enemy_pos.x, do: -1, else: 0)
-
-    dy =
-      if player_pos.y > enemy_pos.y, do: 1, else: if(player_pos.y < enemy_pos.y, do: -1, else: 0)
-
-    if dx != 0 and dy != 0 and :rand.uniform() < 0.5,
-      do: %{dx: dx, dy: 0},
-      else: %{dx: 0, dy: dy}
   end
 end
